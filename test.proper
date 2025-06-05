@@ -1,0 +1,19 @@
+fn add_number(a) {
+    return fn(b) {
+        return a + b;
+    };
+}
+
+fn main() {
+    let a = 10;
+    let b = 34;
+
+    let add_a = add_number(a);
+    let added = add_a(b);
+
+    a = 50;
+
+    a[1].b = 50;
+    a.b = 50;
+    print(b);
+}

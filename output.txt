@@ -1,0 +1,61 @@
+Block {
+  Function 'add_number(a)' {
+    Block {
+      Return
+        Lambda (b) =>
+          Block {
+            Return
+              BinaryExpr (+)
+                Left:
+                  Identifier(a)
+                Right:
+                  Identifier(b)
+          }
+    }
+  }
+  Function 'main()' {
+    Block {
+      Let a =
+        Integer(10)
+      Let b =
+        Integer(34)
+      Let add_a =
+        FunctionCall
+          Callee:
+            Identifier(add_number)
+          Args:
+            Identifier(a)
+      Let added =
+        FunctionCall
+          Callee:
+            Identifier(add_a)
+          Args:
+            Identifier(b)
+      Assign
+        Name:
+          Identifier(a)
+        Value:
+          Integer(50)
+      Assign
+        Name:
+          ArrayIndex
+            Array:
+              Identifier(a)
+            Index:
+              Integer(1)
+        Value:
+          Integer(50)
+      Assign
+        Name:
+          FieldAccess (.b):
+            Identifier(a)
+        Value:
+          Integer(50)
+      FunctionCall
+        Callee:
+          Identifier(print)
+        Args:
+          Identifier(b)
+    }
+  }
+}
