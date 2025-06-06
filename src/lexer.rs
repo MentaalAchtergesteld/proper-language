@@ -1,6 +1,6 @@
 use crate::cursor::Cursor;
 
-#[derive(Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Token {
     // Literals
     
@@ -25,6 +25,7 @@ pub enum Token {
     KeywordMatch,
     KeywordBreak,
     KeywordContinue,
+    KeywordIn,
 
     // Arithmetic Operators
     
@@ -91,7 +92,6 @@ pub enum Token {
 
     EOF
 }
-
 
 #[derive(Debug)]
 pub enum LexerError {
@@ -280,6 +280,7 @@ impl<'a> Lexer<'a> {
                     "match" => Ok(Token::KeywordMatch),
                     "return" => Ok(Token::KeywordReturn),
                     "for" => Ok(Token::KeywordFor),
+                    "in" => Ok(Token::KeywordIn),
                     "while" => Ok(Token::KeywordWhile),
                     "continue" => Ok(Token::KeywordContinue),
                     "break" => Ok(Token::KeywordBreak),
