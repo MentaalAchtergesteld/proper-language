@@ -1,3 +1,5 @@
+use crate::cursor::Cursor;
+
 #[derive(Debug)]
 pub enum Token {
     // Literals
@@ -95,141 +97,124 @@ pub enum LexerError {
 }
 
 pub struct Lexer<'a> {
-    content: &'a [char], 
+    content: Cursor<'a, char>, 
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(content: &'a [char]) -> Self {
         Self {
-            content
+            content: Cursor::new(content)
         }
-    }
-
-    fn get(&self, n: usize) -> Option<char> {
-        if n >= self.content.len() { return None}
-        Some(self.content[n])
-    }
-
-    fn chop(&mut self, n: usize) -> &'a [char] {
-        let chopped = &self.content[..n];
-        self.content = &self.content[n..];
-        return chopped
-    }
-
-    fn chop_while<P>(&mut self, mut predicate: P) -> &'a [char] where P: FnMut(&char) -> bool {
-        let mut n = 0;
-        while n < self.content.len() && predicate(&self.content[n]) {
-            n += 1;
-        }
-        self.chop(n)
     }
 
     fn next_token(&mut self) -> Result<Token, LexerError> {
-        self.chop_while(|c| c.is_whitespace());
+        self.content.chop_while(|c| c.is_whitespace());
         
-        let Some(c) = self.get(0) else {
+        let Some(c) = self.content.peek(0) else {
             return Ok(Token::EOF)
         };
 
         match c {
-            '+' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::PlusAssign) },
-                _ => { self.chop(1); Ok(Token::Plus) },
+            '+' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::PlusAssign) },
+                _ => { self.content.chop(1); Ok(Token::Plus) },
             },
-            '-' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::MinusAssign) },
-                _ => { self.chop(1); Ok(Token::Minus) },
+            '-' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::MinusAssign) },
+                _ => { self.content.chop(1); Ok(Token::Minus) },
             },
-            '*' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::StarAssign) },
-                _ => { self.chop(1); Ok(Token::Star) },
+            '*' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::StarAssign) },
+                _ => { self.content.chop(1); Ok(Token::Star) },
 
             },
-            '/' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::SlashAssign) },
-                _ => { self.chop(1); Ok(Token::Slash) },
+            '/' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::SlashAssign) },
+                _ => { self.content.chop(1); Ok(Token::Slash) },
             },
-            '%' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::PercentAssign) },
-                _ => { self.chop(1); Ok(Token::Percent) },
+            '%' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::PercentAssign) },
+                _ => { self.content.chop(1); Ok(Token::Percent) },
             },
 
-            '=' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::Equal) },
-                _ => { self.chop(1); Ok(Token::Assign) },
+            '=' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::Equal) },
+                _ => { self.content.chop(1); Ok(Token::Assign) },
             },
-            '<' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::LesserEqual) },
-                Some('<') => match self.get(1) {
-                    Some('=') => { self.chop(3); Ok(Token::LeftShiftAssign) },
-                    _ => { self.chop(2); Ok(Token::LeftShift) }
+            '<' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::LesserEqual) },
+                Some('<') => match self.content.peek(1) {
+                    Some('=') => { self.content.chop(3); Ok(Token::LeftShiftAssign) },
+                    _ => { self.content.chop(2); Ok(Token::LeftShift) }
                 }
-                _ => { self.chop(1); Ok(Token::Lesser) },
+                _ => { self.content.chop(1); Ok(Token::Lesser) },
             },
-            '>' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::GreaterEqual) },
-                Some('>') => match self.get(1) {
-                    Some('=') => { self.chop(3); Ok(Token::RightShiftAssign) },
-                    _ => { self.chop(2); Ok(Token::RightShift) }
+            '>' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::GreaterEqual) },
+                Some('>') => match self.content.peek(1) {
+                    Some('=') => { self.content.chop(3); Ok(Token::RightShiftAssign) },
+                    _ => { self.content.chop(2); Ok(Token::RightShift) }
                 }
-                _ => { self.chop(1); Ok(Token::Greater) },
+                _ => { self.content.chop(1); Ok(Token::Greater) },
             },
-            '&' => match self.get(1) {
-                Some('&') => { self.chop(2); Ok(Token::And) },
-                _ => { self.chop(1); Ok(Token::Ampersand) },
+            '&' => match self.content.peek(1) {
+                Some('&') => { self.content.chop(2); Ok(Token::And) },
+                _ => { self.content.chop(1); Ok(Token::Ampersand) },
             },
-            '|' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::Or) },
-                _ => { self.chop(1); Ok(Token::Pipe) },
+            '|' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::Or) },
+                _ => { self.content.chop(1); Ok(Token::Pipe) },
             },
-            '!' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::NotEqual) },
-                _ => { self.chop(1); Ok(Token::Bang) },
+            '!' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::NotEqual) },
+                _ => { self.content.chop(1); Ok(Token::Bang) },
             },
-            '^' => match self.get(1) {
-                Some('=') => { self.chop(2); Ok(Token::CaretAssign) },
-                _ => { self.chop(1); Ok(Token::Caret) },
+            '^' => match self.content.peek(1) {
+                Some('=') => { self.content.chop(2); Ok(Token::CaretAssign) },
+                _ => { self.content.chop(1); Ok(Token::Caret) },
             },
             
             '"' => {
-                self.chop(1);
-                let string = self.chop_while(|c| c != &'"');
-                if self.get(0) == Some('"') {
-                    self.chop(1);
-                    Ok(Token::String(string.iter().collect::<String>()))
+                self.content.chop(1);
+                let string_chars = self.content.chop_while(|c| c != &'"').ok_or(LexerError::InvalidString)?;
+                let string = string_chars.iter().collect::<String>();
+                if self.content.peek(0) == Some(&'"') {
+                    self.content.chop(1);
+                    Ok(Token::String(string))
                 } else {
                    Err(LexerError::InvalidString) 
                 }
             }
 
-            '0'..='9' => match self.get(1) {
+            '0'..='9' => match self.content.peek(1) {
                 Some('x') | Some('X') => {
-                    self.chop(2);
-                    let hex_digits = self.chop_while(|c| c.is_digit(16));
+                    self.content.chop(2);
+                    let hex_digits = self.content.chop_while(|c| c.is_digit(16)).ok_or(LexerError::InvalidNumber)?;
                     let hex_str = hex_digits.iter().collect::<String>();
                     let hex_number = i32::from_str_radix(&hex_str, 16).or(Err(LexerError::InvalidNumber))?;
                     Ok(Token::Hex(hex_number))
                 }
                 Some('b') | Some('B') => {
-                    self.chop(2);
-                    let bin_digits = self.chop_while(|c| c.is_digit(2));
+                    self.content.chop(2);
+                    let bin_digits = self.content.chop_while(|c| c.is_digit(2)).ok_or(LexerError::InvalidNumber)?;
                     let bin_str = bin_digits.iter().collect::<String>();
                     let bin_number = i32::from_str_radix(&bin_str, 2).or(Err(LexerError::InvalidNumber))?;
                     Ok(Token::Bin(bin_number))
                 },
                 _ =>  {
-                    let number = self.chop_while(|c| c.is_digit(10) || c == &'.').iter().collect::<String>();
-                    let is_float = number.contains('.');
+                    let digits = self.content.chop_while(|c| c.is_digit(10) || c == &'.').ok_or(LexerError::InvalidNumber)?;
+                    let str = digits.iter().collect::<String>();
+                    let is_float = str.contains('.');
 
                     if is_float {
-                        let parsed = number.parse::<f32>();
+                        let parsed = str.parse::<f32>();
                         if let Ok(float) = parsed {
                             Ok(Token::Float(float))
                         } else {
                             Err(LexerError::InvalidNumber) 
                         }
                     } else {
-                        let parsed = number.parse::<i32>();
+                        let parsed = str.parse::<i32>();
                         if let Ok(integer) = parsed {
                             Ok(Token::Int(integer))
                         } else {
@@ -239,20 +224,21 @@ impl<'a> Lexer<'a> {
                 }
             }
 
-            '(' => { self.chop(1); Ok(Token::LParen) },
-            ')' => { self.chop(1); Ok(Token::RParen) },
-            '{' => { self.chop(1); Ok(Token::LBrace) },
-            '}' => { self.chop(1); Ok(Token::RBrace) },
-            '[' => { self.chop(1); Ok(Token::LBracket) },
-            ']' => { self.chop(1); Ok(Token::RBRacket) },
+            '(' => { self.content.chop(1); Ok(Token::LParen) },
+            ')' => { self.content.chop(1); Ok(Token::RParen) },
+            '{' => { self.content.chop(1); Ok(Token::LBrace) },
+            '}' => { self.content.chop(1); Ok(Token::RBrace) },
+            '[' => { self.content.chop(1); Ok(Token::LBracket) },
+            ']' => { self.content.chop(1); Ok(Token::RBRacket) },
 
-            ',' => { self.chop(1); Ok(Token::Comma) },
-            ';' => { self.chop(1); Ok(Token::Semicolon) },
-            ':' => { self.chop(1); Ok(Token::Colon) },
-            '.' => { self.chop(1); Ok(Token::Dot) },
+            ',' => { self.content.chop(1); Ok(Token::Comma) },
+            ';' => { self.content.chop(1); Ok(Token::Semicolon) },
+            ':' => { self.content.chop(1); Ok(Token::Colon) },
+            '.' => { self.content.chop(1); Ok(Token::Dot) },
             
             'a'..='z' | 'A'..='Z' => {
-               let identifier = self.chop_while(|c| c.is_alphanumeric() || c == &'_').iter().collect::<String>();
+               let ident_chars = self.content.chop_while(|c| c.is_alphanumeric() || c == &'_').ok_or(LexerError::UnexpectedEndOfFile)?;
+               let identifier = ident_chars.iter().collect::<String>();
 
                match identifier.as_str() {
                    "if" => Ok(Token::KeywordIf),
@@ -270,7 +256,7 @@ impl<'a> Lexer<'a> {
                 _ => Ok(Token::Identifier(identifier)), 
                }
             }
-           _ => Err(LexerError::UnknownToken(c)) 
+           _ => Err(LexerError::UnknownToken(*c)) 
         }
     }
 }

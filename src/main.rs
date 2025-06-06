@@ -1,5 +1,6 @@
 use crate::lexer::Lexer ;
 
+mod cursor;
 mod lexer;
 
 fn main() {
@@ -15,7 +16,7 @@ fn main() {
         }
     "#;
 
-    let chars: Vec<char> = input.chars().collect();
+    let chars = input.chars().collect::<Vec<char>>();
     let lexer = Lexer::new(&chars);
 
     for token in lexer {
