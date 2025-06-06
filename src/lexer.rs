@@ -84,6 +84,11 @@ pub enum Token {
     Colon,
     Dot,
 
+    // Range Operators
+    
+    Range,
+    RangeInclusive,
+
     EOF
 }
 
@@ -159,10 +164,12 @@ impl<'a> Lexer<'a> {
             },
             '&' => match self.content.peek(1) {
                 Some('&') => { self.content.chop(2); Ok(Token::And) },
+                Some('=') => { self.content.chop(2); Ok(Token::AmpersandAssign)},
                 _ => { self.content.chop(1); Ok(Token::Ampersand) },
             },
             '|' => match self.content.peek(1) {
-                Some('=') => { self.content.chop(2); Ok(Token::Or) },
+                Some('|') => { self.content.chop(2); Ok(Token::Or) },
+                Some('=') => { self.content.chop(2); Ok(Token::PipeAssign) },
                 _ => { self.content.chop(1); Ok(Token::Pipe) },
             },
             '!' => match self.content.peek(1) {
@@ -202,19 +209,36 @@ impl<'a> Lexer<'a> {
                     Ok(Token::Bin(bin_number))
                 },
                 _ =>  {
-                    let digits = self.content.chop_while(|c| c.is_digit(10) || c == &'.').ok_or(LexerError::InvalidNumber)?;
-                    let str = digits.iter().collect::<String>();
-                    let is_float = str.contains('.');
+                    let mut number_str = {
+                        let digits = self
+                            .content
+                            .chop_while(|c| c.is_ascii_digit())
+                            .ok_or(LexerError::InvalidNumber)?;
+
+                        digits.iter().copied().collect::<String>()
+                    };
+
+                    let mut is_float = false;
+                    if self.content.peek(0) == Some(&'.') {
+                        if self.content.peek(1) != Some(&'.') {
+                            is_float = true;
+                            number_str.push('.');
+                            self.content.chop(1);
+
+                            let fraction = self.content.chop_while(|c| c.is_digit(10)).ok_or(LexerError::InvalidNumber)?;
+                            number_str.extend(fraction);
+                        }
+                    };
 
                     if is_float {
-                        let parsed = str.parse::<f32>();
+                        let parsed = number_str.parse::<f32>();
                         if let Ok(float) = parsed {
                             Ok(Token::Float(float))
                         } else {
                             Err(LexerError::InvalidNumber) 
                         }
                     } else {
-                        let parsed = str.parse::<i32>();
+                        let parsed = number_str.parse::<i32>();
                         if let Ok(integer) = parsed {
                             Ok(Token::Int(integer))
                         } else {
@@ -234,7 +258,15 @@ impl<'a> Lexer<'a> {
             ',' => { self.content.chop(1); Ok(Token::Comma) },
             ';' => { self.content.chop(1); Ok(Token::Semicolon) },
             ':' => { self.content.chop(1); Ok(Token::Colon) },
-            '.' => { self.content.chop(1); Ok(Token::Dot) },
+            '.' => {
+                match self.content.peek(1) {
+                    Some('.') => match self.content.peek(2) {
+                        Some('=') => { self.content.chop(3); Ok(Token::RangeInclusive) },
+                        _ => { self.content.chop(2); Ok(Token::Range) },
+                    },
+                    _ => { self.content.chop(1); Ok(Token::Dot) },
+                }
+            },
             
             'a'..='z' | 'A'..='Z' => {
                let ident_chars = self.content.chop_while(|c| c.is_alphanumeric() || c == &'_').ok_or(LexerError::UnexpectedEndOfFile)?;
