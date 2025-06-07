@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct Cursor<'a, T> {
     content: &'a [T],
 }

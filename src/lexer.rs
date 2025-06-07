@@ -4,8 +4,6 @@ use crate::cursor::Cursor;
 pub enum Token {
     // Literals
     
-    Hex(i32),
-    Bin(i32),
     Int(i32),
     Float(f32),
     String(String),
@@ -84,12 +82,17 @@ pub enum Token {
     Semicolon,
     Colon,
     Dot,
+    Underscore,
+    MatchArrow,
 
     // Range Operators
     
     Range,
     RangeInclusive,
-
+    
+    // Special
+    
+    Comment(String),
     EOF
 }
 
@@ -135,6 +138,13 @@ impl<'a> Lexer<'a> {
             },
             '/' => match self.content.peek(1) {
                 Some('=') => { self.content.chop(2); Ok(Token::SlashAssign) },
+                Some('/') => {
+                    self.content.chop(2);
+
+                    self.content.chop_while(|c| c.is_whitespace());
+                    let comment = self.content.chop_while(|c| c != &'\n').unwrap_or(&[' ']).iter().collect::<String>();
+                    Ok(Token::Comment(comment))
+                },
                 _ => { self.content.chop(1); Ok(Token::Slash) },
             },
             '%' => match self.content.peek(1) {
@@ -144,6 +154,7 @@ impl<'a> Lexer<'a> {
 
             '=' => match self.content.peek(1) {
                 Some('=') => { self.content.chop(2); Ok(Token::Equal) },
+                Some('>') => { self.content.chop(2); Ok(Token::MatchArrow) },
                 _ => { self.content.chop(1); Ok(Token::Assign) },
             },
             '<' => match self.content.peek(1) {
@@ -199,14 +210,14 @@ impl<'a> Lexer<'a> {
                     let hex_digits = self.content.chop_while(|c| c.is_digit(16)).ok_or(LexerError::InvalidNumber)?;
                     let hex_str = hex_digits.iter().collect::<String>();
                     let hex_number = i32::from_str_radix(&hex_str, 16).or(Err(LexerError::InvalidNumber))?;
-                    Ok(Token::Hex(hex_number))
+                    Ok(Token::Int(hex_number))
                 }
                 Some('b') | Some('B') => {
                     self.content.chop(2);
                     let bin_digits = self.content.chop_while(|c| c.is_digit(2)).ok_or(LexerError::InvalidNumber)?;
                     let bin_str = bin_digits.iter().collect::<String>();
                     let bin_number = i32::from_str_radix(&bin_str, 2).or(Err(LexerError::InvalidNumber))?;
-                    Ok(Token::Bin(bin_number))
+                    Ok(Token::Int(bin_number))
                 },
                 _ =>  {
                     let mut number_str = {
@@ -258,6 +269,7 @@ impl<'a> Lexer<'a> {
             ',' => { self.content.chop(1); Ok(Token::Comma) },
             ';' => { self.content.chop(1); Ok(Token::Semicolon) },
             ':' => { self.content.chop(1); Ok(Token::Colon) },
+            '_' => { self.content.chop(1); Ok(Token::Underscore) },
             '.' => {
                 match self.content.peek(1) {
                     Some('.') => match self.content.peek(2) {
