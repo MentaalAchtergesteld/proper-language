@@ -6,6 +6,7 @@ use crate::lexer::Lexer ;
 mod cursor;
 mod lexer;
 mod parser;
+mod compiler;
 
 fn main() -> Result<(), ()> {
     const TEST_SRC: &str = r#"

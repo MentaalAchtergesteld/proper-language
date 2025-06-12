@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{cursor::Cursor, lexer::Token};
 
 #[derive(Debug)]
-enum BinaryOperator {
+pub enum BinaryOperator {
     Add,
     Sub,
     Mul,
@@ -22,20 +22,20 @@ enum BinaryOperator {
 }
 
 #[derive(Debug)]
-enum UnaryOperator {
+pub enum UnaryOperator {
     Invert,
     Negative,
     Positive
 }
 
 #[derive(Debug)]
-enum RangeType {
+pub enum RangeType {
     Exclusive,
     Inclusive
 }
 
 #[derive(Debug)]
-enum Literal {
+pub enum Literal {
     Integer(i32),
     Float(f32),
     Boolean(bool),
@@ -43,7 +43,7 @@ enum Literal {
 }
 
 #[derive(Debug)]
-enum Expression {
+pub enum Expression {
     Literal(Literal),
     Identifier(String),
 
