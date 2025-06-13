@@ -62,6 +62,14 @@ pub enum Instruction {
 
     Jump(usize),
     JumpIfFalse(usize),
+
+    ArraySet,
+    FieldSet
+}
+
+enum ResolvedVar {
+    Local(usize),
+    Upvalue(usize)
 }
 
 struct CompiledFunction { 
@@ -297,18 +305,34 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_assign(&mut self, target: Expression, operator: Option<BinaryOperator>, value: Expression, instructions: &mut Vec<Instruction>) -> Result<(), CompilerError> {
-        match operator {
-            Some(op) => {},
-            None => {}
+    fn resolve_variable(&mut self, name: String) -> Result<ResolvedVar, CompilerError> {
+        if let Some(index) = self.get_current_scope()?.get_local(&name) {
+            Ok(ResolvedVar::Local(index))
+        } else if let Some(index) = self.get_current_function_scope()?.get_upvalue(&name) {
+            Ok(ResolvedVar::Upvalue(index))
+        } else if let Some(index) = self.get_current_function_scope()?.add_upvalue(name.clone()) {
+            Ok(ResolvedVar::Upvalue(index))
+        } else {
+            Err(CompilerError::UndefinedVariable(name.clone()))
         }
+    }
 
-        match self.resolve_variable(target)? {
-            Resolved::Local(index) => instructions.push(Instruction::Store(index)),
-            Resolved::Upvalue(index) => instructions.push(Instruction::StoreUpvalue(index)),
-            _ => return Err(CompilerError::UndefinedVariable(target))
+    fn compile_assign(&mut self, target: Expression, operator: Option<BinaryOperator>, value: Expression, instructions: &mut Vec<Instruction>) -> Result<(), CompilerError> {
+        match target {
+            Expression::Identifier(name) => {
+                self.compile_expression(value, instructions)?;
+
+                match self.resolve_variable(name)? {
+                    ResolvedVar::Local(index) => instructions.push(Instruction::Store(index)),
+                    ResolvedVar::Upvalue(index) => instructions.push(Instruction::Store(index)),
+                };
+
+                Ok(())
+            },
+            Expression::ArrayIndex { target, index } => {},
+            Expression::Field { target, name } => {},
+            _ => Err(CompilerError::InvalidAssignment)
         }
-        Ok(())
     }
 
     fn compile_block(&mut self, block: Vec<Statement>, instructions: &mut Vec<Instruction>) -> Result<(), CompilerError> {
