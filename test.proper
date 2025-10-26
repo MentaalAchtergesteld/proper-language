@@ -16,4 +16,8 @@ fn main() {
     a[1].b = 50;
     a.b = 50;
     print(b);
+
+		let test = "Hello, World!";
 }
+
+"Test 123"

@@ -1,83 +1,326 @@
-use lexer::{LexerError, Token};
-use parser::Parser;
+use std::{fs, iter::Peekable, str::Chars};
 
-use crate::lexer::Lexer ;
+#[derive(Debug)]
+enum Token {
+    OpenParen,
+    CloseParen,
+    OpenCurly,
+    CloseCurly,
+    OpenBracket,
+    CloseBracket,
+    
+    Comma,
+    Dot,
+    Colon,
+    Semicolon,
 
-mod cursor;
-mod lexer;
-mod parser;
-mod compiler;
+    Assign,
+
+    Plus,
+    PlusAssign,
+    Minus,
+    MinusAssign,
+    Star,
+    StarAssign,
+    Slash,
+    SlashAssign,
+    Percent,
+    PercentAssign,
+
+    Ampersand,
+    AmpersandAssign,
+    Pipe,
+    PipeAssign,
+    Caret,
+    CaretAssign,
+    LeftShift,
+    LeftShiftAssign,
+    RightShift,
+    RightShiftAssign,
+
+    And,
+    Or,
+    Bang,
+
+    Equal,
+    NotEqual,
+    LessThan,
+    LessThanEqual,
+    GreaterThan,
+    GreaterThanEqual,
+
+    IntegerLiteral(i32),
+    FloatLiteral(f32),
+    StringLiteral(String),
+    BoolLiteral(bool),
+    Identifier(String),
+
+    If,
+    Else,
+    While,
+    For,
+    Fn,
+    Let,
+    Return,
+    Continue,
+    Break,
+
+    EndOfFile,
+}
+
+#[derive(Debug)]
+enum LexerError {
+    UnterminatedString(String),
+    InvalidNumber(String),
+    UnknownToken(String),
+}
+
+struct Lexer<'a> {
+    chars: Peekable<Chars<'a>>,
+}
+
+impl<'a> Lexer<'a> {
+    pub fn new(source: &'a str) -> Self {
+        Lexer { chars: source.chars().peekable() }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(&c) = self.chars.peek() {
+            if c.is_whitespace() {
+                self.chars.next();
+            } else { break }
+        }
+    }
+}
+
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Result<Token, LexerError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.skip_whitespace();    
+
+        let next_char = match self.chars.next() {
+            Some(c) => c,
+            None => return None
+        };
+
+        let token_result = match next_char {
+            '(' => Ok(Token::OpenParen),
+            ')' => Ok(Token::CloseParen),
+            '{' => Ok(Token::OpenCurly),
+            '}' => Ok(Token::CloseCurly),
+            '[' => Ok(Token::OpenBracket),
+            ']' => Ok(Token::CloseBracket),
+
+            ',' => Ok(Token::Comma),
+            '.' => Ok(Token::Dot),
+            ':' => Ok(Token::Colon),
+            ';' => Ok(Token::Semicolon),
+
+            '=' => match self.chars.peek() {
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::Equal)
+                },
+                _ => Ok(Token::Assign)
+            },
+            '+' => match self.chars.peek() {
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::PlusAssign)
+                },
+                _ => Ok(Token::Plus)
+            },
+            '-' => match self.chars.peek() {
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::MinusAssign)
+                },
+                _ => Ok(Token::Minus)
+            },
+            '*' => match self.chars.peek() {
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::StarAssign)
+                },
+                _ => Ok(Token::Star)
+            },
+            '/' => match self.chars.peek() {
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::SlashAssign)
+                },
+                _ => Ok(Token::Slash)
+            },
+            '%' => match self.chars.peek() {
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::PercentAssign)
+                },
+                _ => Ok(Token::Percent)
+            },
+
+
+            '&' => match self.chars.peek() {
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::AmpersandAssign)
+                },
+                Some('&') => {
+                    self.chars.next();
+                    Ok(Token::And)
+                }
+                _ => Ok(Token::Ampersand)
+            },
+            '|' => match self.chars.peek() {
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::PipeAssign)
+                },
+                Some('|') => {
+                    self.chars.next();
+                    Ok(Token::Or)
+                }
+                _ => Ok(Token::Pipe)
+            },
+            '^' => match self.chars.peek() {
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::CaretAssign)
+                },
+                _ => Ok(Token::Caret)
+            },
+            '>' => match self.chars.peek() {
+                Some('>') => {
+                    self.chars.next();
+                    match self.chars.peek() {
+                        Some('=') => {
+                            self.chars.next();
+                            Ok(Token::RightShiftAssign)
+                        },
+                        _ => Ok(Token::RightShift)
+                    }
+                },
+                Some('=') => {
+                    self.chars.next();
+
+                    Ok(Token::GreaterThanEqual)
+                }
+                _ => Ok(Token::GreaterThan)
+            },
+            '<' => match self.chars.peek() {
+                Some('<') => {
+                    self.chars.next();
+                    match self.chars.peek() {
+                        Some('=') => {
+                            self.chars.next();
+                            Ok(Token::RightShiftAssign)
+                        },
+                        _ => Ok(Token::RightShift)
+                    }
+                },
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::LessThanEqual)
+                }
+                _ => Ok(Token::LessThan)
+            },
+            '!' => match self.chars.peek() {
+                Some('=') => {
+                    self.chars.next();
+                    Ok(Token::NotEqual)
+                },
+                _ => Ok(Token::Bang)
+            },
+            next_char if next_char.is_digit(10) => {
+                let mut number_str = String::from(next_char);
+                let mut seen_dot = false;
+
+                while let Some(&c) = self.chars.peek() {
+                    match c {
+                        c if c.is_digit(10) => number_str.push(self.chars.next().unwrap()),
+                        '.' => {
+                            number_str.push(self.chars.next().unwrap());
+                            seen_dot = true;
+                        },
+                        _ => break,
+                    }
+                }
+
+                if seen_dot {
+                    match number_str.parse::<f32>() {
+                        Ok(n) => Ok(Token::FloatLiteral(n)),
+                        Err(_) => Err(LexerError::InvalidNumber(number_str))
+                    }
+                } else {
+                    match number_str.parse::<i32>() {
+                        Ok(n) => Ok(Token::IntegerLiteral(n)),
+                        Err(_) => Err(LexerError::InvalidNumber(number_str))
+                    }
+                }
+            },
+            '"' => {
+                let mut string_str = String::new();
+                let mut closed = false;
+                while let Some(&_) = self.chars.peek() {
+                    let c = self.chars.next().unwrap();
+                    if c == '"' { closed = true; break };
+                    string_str.push(c);
+                }
+
+                if closed {
+                    Ok(Token::StringLiteral(string_str))
+                } else {
+                    Err(LexerError::UnterminatedString(string_str))
+                }
+
+            }
+            _ => {
+                let mut identifier_str = String::from(next_char);
+                while let Some(&c) = self.chars.peek() {
+                    if c.is_whitespace() { break };
+                    if !c.is_alphanumeric() && c != '_' { break };
+                    identifier_str.push(self.chars.next().unwrap());
+                }
+
+                match identifier_str.as_str() {
+                    "true"     => Ok(Token::BoolLiteral(true)),
+                    "false"    => Ok(Token::BoolLiteral(false)),
+                    "if"       => Ok(Token::If),
+                    "else"     => Ok(Token::Else),
+                    "while"    => Ok(Token::While),
+                    "for"      => Ok(Token::For),
+                    "fn"       => Ok(Token::Fn),
+                    "let"      => Ok(Token::Let),
+                    "return"   => Ok(Token::Return),
+                    "continue" => Ok(Token::Continue),
+                    "break"    => Ok(Token::Break),
+                    _          => Ok(Token::Identifier(identifier_str))
+                }
+            }
+        };
+
+        Some(token_result)
+    }
+}
 
 fn main() -> Result<(), ()> {
-    const TEST_SRC: &str = r#"
-        // Variabele declaraties en assignments
-        let x = 42;
-        let y = 3.14;
-        let s = "hello";
-        let b = true;
-        let o;                    // zonder initializer
+    let args = std::env::args().collect::<Vec<String>>();
+    if args.len() < 2 {
+        let program = &args[0];
+        eprintln!("ERROR: Correct usage: {program} <filename>");
+        return Err(());
+    }
 
-        x = x + 1;
-        y += 2.0;
-        s = s + " world";
-        b = !b;
+    let filepath = &args[1];
 
-        // If / else if / else
-        if x < 10 {
-            x = x * 2;
-        } else if x < 100 {
-            x -= 5;
-        } else {
-            x = 0;
-        }
+    let source_code = fs::read_to_string(filepath)
+        .map_err(|e| eprintln!("ERROR: Couldn't read file '{filepath}': {e}"))?;
 
-        // While en For
-        while b && x != 0 {
-            x = x - 1;
-            if x == 5 { break }
-            continue
-        }
 
-        for i in 0..=10 {
-            let arr = [1, 2, 3, i];
-            let obj = { foo: i, bar: "baz", };
-            obj.foo;
-            arr[2];
-            print(arr[i].field());
-        }
-
-        // Functie definitie en calls
-        fn add(a, b) {
-            return a + b;
-        }
-        let z = add(x, y);
-
-        // Match statement
-        match z {
-            0 => println("zero"),
-            1 => { println("one or two"); },
-            _ => println("many"),
-        }
-    "#;
-
-    let chars = TEST_SRC.chars().collect::<Vec<char>>();
-
-    let lexer = Lexer::new(&chars);
-    let tokens = lexer.collect::<Result<Vec<Token>, LexerError>>()
-        .map_err(|e| eprintln!("ERROR: couldn't tokenize input: {e:?}"))?
-        .iter()
-        .filter(|token| !matches!(token, &Token::Comment(_)))
-        .map(|token| token.clone())
-        .collect::<Vec<Token>>();
-    
-    println!("Tokens: {tokens:?}");
-
-    let mut parser = Parser::new(&tokens);
-    let ast = parser.parse_program()
-        .map_err(|e| eprintln!("ERROR: couldn't parse tokens to AST: {e:?}"))?;
-    
-    println!("");
-    println!("AST: {ast:?}");
+    for token in Lexer::new(&source_code) {
+        println!("Token: {token:?}");
+    }
 
     Ok(())
 }
