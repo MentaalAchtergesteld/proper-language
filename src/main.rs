@@ -1,6 +1,6 @@
-use std::{fs, iter::Peekable, str::Chars};
+use std::{fs, iter::Peekable, slice::Iter, str::Chars, string::ParseError};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Token {
     OpenParen,
     CloseParen,
@@ -300,6 +300,136 @@ impl<'a> Iterator for Lexer<'a> {
         };
 
         Some(token_result)
+    }
+}
+
+enum ASTBuilderError {
+    ExpectedToken(Token),
+    UnexpectedEOF,
+}
+
+enum Statement {
+    Empty
+}
+
+struct ASTBuilder {
+    tokens: Vec<Token>,
+    position: usize
+}
+
+impl ASTBuilder {
+    pub fn new(tokens: Vec<Token>) -> ASTBuilder {
+        ASTBuilder {
+            tokens,
+            position: 0
+        }
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.position)
+    }
+
+    fn consume(&mut self) -> Option<&Token> {
+        let token = self.tokens.get(self.position);
+        if token.is_some() {
+            self.position += 1;
+        }
+        token
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.position >= self.tokens.len()
+    }
+
+    fn parse_expression(&mut self) {
+
+    }
+
+    fn parse_if_statement(&mut self)         -> Result<Statement, ASTBuilderError> {
+        self.consume();
+
+        let condition = self.parse_expression();
+        let block = self.parse_block();
+
+        todo!()
+    }
+
+    fn parse_while_statement(&mut self)      -> Result<Statement, ASTBuilderError> {}
+
+    fn parse_for_statement(&mut self)        -> Result<Statement, ASTBuilderError> {}
+
+    fn parse_fn_statement(&mut self)         -> Result<Statement, ASTBuilderError> {}
+
+    fn parse_let_statement(&mut self)        -> Result<Statement, ASTBuilderError> {
+        self.consume();
+
+        let name = match self.consume() {
+            Some(Token::Identifier(name_str)) => name_str.clone(),
+            _ => return Err(ASTBuilderError::ExpectedToken(Token::Identifier(String::new()))),
+        };
+
+        match self.consume() {
+            Some(Token::Assign) => {},
+            _ => return Err(ASTBuilderError::ExpectedToken(Token::Assign))
+        };
+
+        let value = self.parse_expression();
+
+        todo!()
+    }
+
+    fn parse_return_statement(&mut self)     -> Result<Statement, ASTBuilderError> {}
+
+    fn parse_continue_statement(&mut self)   -> Result<Statement, ASTBuilderError> {}
+
+    fn parse_break_statement(&mut self)      -> Result<Statement, ASTBuilderError> {}
+
+    fn parse_expression_statement(&mut self) -> Result<Statement, ASTBuilderError> {}
+
+    fn parse_statement(&mut self) -> Result<Statement, ASTBuilderError> {
+        match self.peek() {
+            Some(Token::If)       => self.parse_if_statement(),
+            Some(Token::While)    => self.parse_while_statement(),
+            Some(Token::For)      => self.parse_for_statement(),
+            Some(Token::Fn)       => self.parse_fn_statement(),
+            Some(Token::Let)      => self.parse_let_statement(),
+            Some(Token::Return)   => self.parse_return_statement(),
+            Some(Token::Continue) => self.parse_continue_statement(),
+            Some(Token::Break)    => self.parse_break_statement(),
+            Some(_)               => self.parse_expression_statement(),
+            None                  => Err(ASTBuilderError::UnexpectedEOF),
+        } 
+    }
+
+    fn parse_block(&mut self) -> Result<Vec<Statement>, ASTBuilderError> {
+        let mut statements = Vec::new();
+        match self.consume() {
+            Some(Token::OpenCurly) => {},
+            Some(_) => return Err(ASTBuilderError::ExpectedToken(Token::OpenCurly)),
+            _       => return Err(ASTBuilderError::UnexpectedEOF)
+        };
+
+        while let Some(token) = self.peek() {
+            if *token == Token::CloseCurly { break; }
+            statements.push(self.parse_statement()?);
+        }
+
+        match self.consume() {
+            Some(Token::CloseCurly) => {},
+            _ => return Err(ASTBuilderError::ExpectedToken(Token::CloseCurly))
+        }
+
+        Ok(statements)
+    }
+
+    pub fn build(&mut self) -> Result<Vec<Statement>, ASTBuilderError> {
+        let mut statements = Vec::new();
+
+        while !self.is_at_end() {
+            statements.push(self.parse_statement()?);
+        }
+
+        Ok(statements)
     }
 }
 
