@@ -58,7 +58,7 @@ enum Token {
     If,
     Else,
     While,
-    For,
+    // For,
     Fn,
     Let,
     Return,
@@ -287,7 +287,7 @@ impl<'a> Iterator for Lexer<'a> {
                     "if"       => Ok(Token::If),
                     "else"     => Ok(Token::Else),
                     "while"    => Ok(Token::While),
-                    "for"      => Ok(Token::For),
+                    // "for"      => Ok(Token::For),
                     "fn"       => Ok(Token::Fn),
                     "let"      => Ok(Token::Let),
                     "return"   => Ok(Token::Return),
@@ -308,8 +308,35 @@ enum ASTBuilderError {
     UnexpectedEOF,
 }
 
+enum Expression {}
+
 enum Statement {
-    Empty
+    If {
+        condition: Expression,
+        block: Vec<Statement>,
+        else_branch: Option<Vec<Statement>>
+    },
+    While {
+        condition: Expression,
+        block: Vec<Statement>
+    },
+    FnDefinition {
+        name: String,
+        params: Vec<String>,
+        block: Vec<Statement>
+    },
+    Let {
+        name: String,
+        value: Option<Expression>
+    },
+    Return {
+        value: Option<Expression>
+    },
+    Continue,
+    Break,
+    Expression {
+        value: Expression
+    }
 }
 
 struct ASTBuilder {
@@ -337,60 +364,135 @@ impl ASTBuilder {
         token
     }
 
+    fn expect_token(&mut self, token: Token) -> Result<&Token, ASTBuilderError> {
+        let next = self.consume().ok_or(ASTBuilderError::UnexpectedEOF)?;
+        if *next == token {
+            Ok(next)
+        } else {
+            Err(ASTBuilderError::ExpectedToken(token))
+        }
+    }
+
+    fn expect_identifier(&mut self) -> Result<String, ASTBuilderError> {
+        let next = self.consume().ok_or(ASTBuilderError::UnexpectedEOF)?;
+        match next {
+            Token::Identifier(name) => Ok(name.clone()),
+            _ => Err(ASTBuilderError::ExpectedToken(Token::Identifier(String::new())))
+        }
+    }
+
     fn is_at_end(&self) -> bool {
         self.position >= self.tokens.len()
     }
 
-    fn parse_expression(&mut self) {
+    fn parse_expression(&mut self) -> Result<Expression, ASTBuilderError> {
 
     }
 
-    fn parse_if_statement(&mut self)         -> Result<Statement, ASTBuilderError> {
-        self.consume();
+    fn parse_if_statement(&mut self) -> Result<Statement, ASTBuilderError> {
+        self.expect_token(Token::If)?;
 
-        let condition = self.parse_expression();
-        let block = self.parse_block();
+        let condition = self.parse_expression()?;
+        let block = self.parse_block()?;
 
-        todo!()
+        let else_branch = match self.peek() {
+            Some(Token::Else) => {
+                self.consume();
+                match self.peek() {
+                    Some(Token::If) => Some(vec![self.parse_if_statement()?]),
+                    _ => Some(self.parse_block()?)
+                }
+            },
+            _ => None,
+        };
+
+        Ok(Statement::If {
+            condition,
+            block,
+            else_branch
+        }) 
     }
 
-    fn parse_while_statement(&mut self)      -> Result<Statement, ASTBuilderError> {}
+    fn parse_while_statement(&mut self) -> Result<Statement, ASTBuilderError> {
+        self.expect_token(Token::While);
 
-    fn parse_for_statement(&mut self)        -> Result<Statement, ASTBuilderError> {}
+        let condition = self.parse_expression()?;
+        let block = self.parse_block()?;
 
-    fn parse_fn_statement(&mut self)         -> Result<Statement, ASTBuilderError> {}
+        Ok(Statement::While { condition, block })
+    }
+
+    // fn parse_for_statement(&mut self)        -> Result<Statement, ASTBuilderError> {}
+
+    fn parse_fn_statement(&mut self) -> Result<Statement, ASTBuilderError> {
+        self.expect_token(Token::Fn);
+
+        let name = self.expect_identifier()?;
+
+        self.expect_token(Token::OpenParen);
+        let mut params = Vec::new();
+        while let Some(token) = self.peek() {
+            if *token == Token::CloseParen { break };
+
+            let param = self.expect_identifier()?;
+            params.push(param);
+
+            if self.peek() != Some(&Token::Comma) { break };
+        }
+        self.expect_token(Token::CloseParen)?;
+
+        let block = self.parse_block()?;
+
+        Ok(Statement::FnDefinition { name, params, block })
+    }
 
     fn parse_let_statement(&mut self)        -> Result<Statement, ASTBuilderError> {
-        self.consume();
+        self.expect_token(Token::Let)?;
 
-        let name = match self.consume() {
-            Some(Token::Identifier(name_str)) => name_str.clone(),
-            _ => return Err(ASTBuilderError::ExpectedToken(Token::Identifier(String::new()))),
+        let name = self.expect_identifier()?;
+
+        let value = match self.peek() {
+            Some(Token::Assign) => {
+                self.consume();
+                Some(self.parse_expression()?)
+            },
+            _ => None,
         };
 
-        match self.consume() {
-            Some(Token::Assign) => {},
-            _ => return Err(ASTBuilderError::ExpectedToken(Token::Assign))
-        };
-
-        let value = self.parse_expression();
-
-        todo!()
+        Ok(Statement::Let { name, value })
     }
 
-    fn parse_return_statement(&mut self)     -> Result<Statement, ASTBuilderError> {}
+    fn parse_return_statement(&mut self)     -> Result<Statement, ASTBuilderError> {
+        self.expect_token(Token::Return);
+        let value = match self.peek() {
+            Some(Token::Semicolon) => None,
+            _ => Some(self.parse_expression()?),
+        };
+        if self.peek() == Some(&Token::Semicolon) { self.consume(); }
+        Ok(Statement::Return { value })
+    }
 
-    fn parse_continue_statement(&mut self)   -> Result<Statement, ASTBuilderError> {}
+    fn parse_continue_statement(&mut self) -> Result<Statement, ASTBuilderError> {
+        self.expect_token(Token::Continue);
+        Ok(Statement::Continue)
+    }
 
-    fn parse_break_statement(&mut self)      -> Result<Statement, ASTBuilderError> {}
+    fn parse_break_statement(&mut self)      -> Result<Statement, ASTBuilderError> {
+        self.expect_token(Token::Break);
+        Ok(Statement::Break)
+    }
 
-    fn parse_expression_statement(&mut self) -> Result<Statement, ASTBuilderError> {}
+    fn parse_expression_statement(&mut self) -> Result<Statement, ASTBuilderError> {
+        let value = self.parse_expression()?;
+        self.expect_token(Token::Semicolon);
+        Ok(Statement::Expression { value })
+    }
 
     fn parse_statement(&mut self) -> Result<Statement, ASTBuilderError> {
         match self.peek() {
             Some(Token::If)       => self.parse_if_statement(),
             Some(Token::While)    => self.parse_while_statement(),
-            Some(Token::For)      => self.parse_for_statement(),
+            // Some(Token::For)      => self.parse_for_statement(),
             Some(Token::Fn)       => self.parse_fn_statement(),
             Some(Token::Let)      => self.parse_let_statement(),
             Some(Token::Return)   => self.parse_return_statement(),
@@ -403,21 +505,13 @@ impl ASTBuilder {
 
     fn parse_block(&mut self) -> Result<Vec<Statement>, ASTBuilderError> {
         let mut statements = Vec::new();
-        match self.consume() {
-            Some(Token::OpenCurly) => {},
-            Some(_) => return Err(ASTBuilderError::ExpectedToken(Token::OpenCurly)),
-            _       => return Err(ASTBuilderError::UnexpectedEOF)
-        };
+        self.expect_token(Token::OpenCurly)?;
 
         while let Some(token) = self.peek() {
             if *token == Token::CloseCurly { break; }
             statements.push(self.parse_statement()?);
         }
-
-        match self.consume() {
-            Some(Token::CloseCurly) => {},
-            _ => return Err(ASTBuilderError::ExpectedToken(Token::CloseCurly))
-        }
+        self.expect_token(Token::CloseCurly)?;
 
         Ok(statements)
     }
