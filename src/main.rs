@@ -64,8 +64,6 @@ enum Token {
     Return,
     Continue,
     Break,
-
-    EndOfFile,
 }
 
 #[derive(Debug)]
@@ -214,9 +212,9 @@ impl<'a> Iterator for Lexer<'a> {
                     match self.chars.peek() {
                         Some('=') => {
                             self.chars.next();
-                            Ok(Token::RightShiftAssign)
+                            Ok(Token::LeftShiftAssign)
                         },
-                        _ => Ok(Token::RightShift)
+                        _ => Ok(Token::LeftShift)
                     }
                 },
                 Some('=') => {
@@ -275,7 +273,7 @@ impl<'a> Iterator for Lexer<'a> {
                 }
 
             }
-            _ => {
+            next_char if next_char.is_alphabetic() || next_char == '_' => {
                 let mut identifier_str = String::from(next_char);
                 while let Some(&c) = self.chars.peek() {
                     if c.is_whitespace() { break };
@@ -297,7 +295,8 @@ impl<'a> Iterator for Lexer<'a> {
                     "break"    => Ok(Token::Break),
                     _          => Ok(Token::Identifier(identifier_str))
                 }
-            }
+            },
+            _ => Err(LexerError::UnknownToken(next_char.to_string())),
         };
 
         Some(token_result)
@@ -306,20 +305,19 @@ impl<'a> Iterator for Lexer<'a> {
 
 fn main() -> Result<(), ()> {
     let args = std::env::args().collect::<Vec<String>>();
-    if args.len() < 2 {
-        let program = &args[0];
-        eprintln!("ERROR: Correct usage: {program} <filename>");
-        return Err(());
-    }
 
-    let filepath = &args[1];
+    let filepath = args.get(1).ok_or(())
+        .map_err(|_| eprintln!("ERROR: Correct usage: {} <filename>", &args[0]))?;
+
 
     let source_code = fs::read_to_string(filepath)
         .map_err(|e| eprintln!("ERROR: Couldn't read file '{filepath}': {e}"))?;
 
+    let tokens = Lexer::new(&source_code).collect::<Result<Vec<Token>, LexerError>>()
+        .map_err(|e| eprintln!("ERROR: Couldn't tokenize file: {e:?}"))?;
 
-    for token in Lexer::new(&source_code) {
-        println!("Token: {token:?}");
+    for token in tokens {
+        println!("{token:?}");
     }
 
     Ok(())
