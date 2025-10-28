@@ -1,6 +1,6 @@
-use std::{fs, iter::Peekable, slice::Iter, str::Chars, string::ParseError};
+use std::{fs, iter::Peekable, str::Chars};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 enum Token {
     OpenParen,
     CloseParen,
@@ -304,11 +304,71 @@ impl<'a> Iterator for Lexer<'a> {
 }
 
 enum ASTBuilderError {
+    UnexpectedToken(Token),
     ExpectedToken(Token),
     UnexpectedEOF,
 }
 
-enum Expression {}
+enum BinaryOperator {
+    Or,
+    And,
+    Equal,
+    NotEqual,
+    GreaterThan,
+    GreaterThanEqual,
+    LessThan,
+    LessThanEqual,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+}
+
+enum UnaryOperator {
+    Not,
+    Negate,
+}
+
+enum LiteralValue {
+    Integer(i32),
+    Float(f32),
+    String(String),
+    Bool(bool)
+}
+
+enum Expression {
+    BinaryExpression {
+        left: Box<Expression>,
+        right: Box<Expression>,
+        operator: BinaryOperator,
+    },
+    UnaryExpression {
+        operator: UnaryOperator,
+        right: Box<Expression>,
+    },
+    Literal(LiteralValue),
+    Grouping(Box<Expression>),
+    Variable(String),
+    Assign {
+        variable: Box<Expression>,
+        value: Box<Expression>,
+    },
+    Call {
+        callee: Box<Expression>,
+        args: Vec<Expression>
+    },
+    Index {
+        callee: Box<Expression>,
+        index: Box<Expression>
+    },
+    Field {
+        callee: Box<Expression>,
+        name: String
+    },
+    Array(Vec<Expression>),
+    Struct(Vec<(String, Expression)>)
+}
 
 enum Statement {
     If {
@@ -385,8 +445,125 @@ impl ASTBuilder {
         self.position >= self.tokens.len()
     }
 
-    fn parse_expression(&mut self) -> Result<Expression, ASTBuilderError> {
+    fn parse_binary(
+        &mut self, 
+        next_level: fn(&mut Self) -> Result<Expression, ASTBuilderError>,
+        map_token_to_op: impl Fn(&Token) -> Option<BinaryOperator>,
+    ) -> Result<Expression, ASTBuilderError> {
+        let mut left = next_level(self)?; 
 
+        while let Some(token) = self.peek() {
+            let operator = match map_token_to_op(token) {
+                Some(t) => t,
+                None => break
+            };
+            self.consume();
+
+            let right = next_level(self)?;
+            left = Expression::BinaryExpression {
+                left: Box::new(left),
+                right: Box::new(right),
+                operator
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_array(&mut self) -> Result<Expression, ASTBuilderError> {}
+    fn parse_object(&mut self) -> Result<Expression, ASTBuilderError> {}
+
+    fn parse_atom(&mut self) -> Result<Expression, ASTBuilderError> {
+        match self.peek() {
+            Some(Token::OpenParen) => {
+                let expr = self.parse_expression()?;
+                self.expect_token(Token::CloseParen)?;
+                Ok(expr)
+            },
+            Some(Token::OpenBracket) => self.parse_array(),
+            Some(Token::OpenCurly) => self.parse_object(),
+            Some(Token::IntegerLiteral(il)) => Ok(Expression::Literal(LiteralValue::Integer(*il))),
+            Some(Token::FloatLiteral(fl)) => Ok(Expression::Literal(LiteralValue::Float(*fl))),
+            Some(Token::StringLiteral(sl)) => Ok(Expression::Literal(LiteralValue::String(sl.clone()))),
+            Some(Token::BoolLiteral(bl)) => Ok(Expression::Literal(LiteralValue::Bool(*bl))),
+            Some(token) => Err(ASTBuilderError::UnexpectedToken(token.clone())),
+            _ => Err(ASTBuilderError::UnexpectedEOF),
+        }
+    }
+
+    fn parse_primary(&mut self) -> Result<Expression, ASTBuilderError> {
+        let atom = self.parse_atom()?;
+        todo!()
+    }
+
+    fn parse_unary(&mut self) -> Result<Expression, ASTBuilderError> {
+        let operator = match self.peek() {
+            Some(Token::Bang) => Some(UnaryOperator::Not),
+            Some(Token::Minus) => Some(UnaryOperator::Negate),
+            Some(Token::Plus) => {
+                self.consume();
+                return self.parse_unary();
+            },
+            _ => None
+        };
+
+        if let Some(operator) = operator {
+            self.consume();
+
+            let right = Box::new(self.parse_unary()?);
+
+            Ok(Expression::UnaryExpression {
+                operator, right
+            })
+        } else {
+            self.parse_primary()
+        }
+    }
+
+    fn parse_multiplicative(&mut self) -> Result<Expression, ASTBuilderError> {
+        self.parse_binary(Self::parse_unary, |t| match t {
+                Token::Star => Some(BinaryOperator::Multiply),
+                Token::Slash => Some(BinaryOperator::Divide),
+                Token::Percent => Some(BinaryOperator::Modulo),
+                _ => None
+        })
+    }
+
+    fn parse_additive(&mut self) -> Result<Expression, ASTBuilderError> {
+        self.parse_binary(Self::parse_multiplicative, |t| match t {
+                Token::Plus => Some(BinaryOperator::Add),
+                Token::Minus => Some(BinaryOperator::Subtract),
+                _ => None
+        })
+    }
+
+    fn parse_relational(&mut self) -> Result<Expression, ASTBuilderError> {
+        self.parse_binary(Self::parse_additive, |t| match t {
+                Token::LessThan => Some(BinaryOperator::LessThan),
+                Token::LessThanEqual => Some(BinaryOperator::LessThanEqual),
+                Token::GreaterThan => Some(BinaryOperator::GreaterThan),
+                Token::GreaterThanEqual => Some(BinaryOperator::GreaterThanEqual),
+                _ => None
+        })
+    }
+
+    fn parse_equality(&mut self) -> Result<Expression, ASTBuilderError> {
+        self.parse_binary(Self::parse_relational, |t| match t {
+                Token::Equal => Some(BinaryOperator::Equal),
+                Token::NotEqual => Some(BinaryOperator::NotEqual),
+                _ => None
+        })
+    }
+
+    fn parse_logical(&mut self) -> Result<Expression, ASTBuilderError> {
+        self.parse_binary(Self::parse_equality, |t| match t {
+            Token::Or => Some(BinaryOperator::Or),
+            Token::And => Some(BinaryOperator::And),
+            _ => None,
+        })
+    }
+
+    fn parse_expression(&mut self) -> Result<Expression, ASTBuilderError> {
+        self.parse_logical()
     }
 
     fn parse_if_statement(&mut self) -> Result<Statement, ASTBuilderError> {

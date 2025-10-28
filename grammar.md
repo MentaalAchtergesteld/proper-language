@@ -38,10 +38,8 @@ ParameterList ::= IDENTIFIER { "," IDENTIFIER }
 
 ExpressionStatement ::= Expression ";"
 
-Expression ::= RangeExpression
-RangeExpression ::= LogicalOrExpression \[ ( ".." | "..=" ) LogicalOrExpression \]
-LogicalOrExpression ::= LogicalAndExpression { "||" LogicalAndExpression }
-LogicalAndExpression ::= EqualityExpression { "&&" EqualityExpression }
+Expression ::= LogicalOrExpression
+LogicalExpression ::= EqualityExpression { ( "||" | "&&" ) EqualityExpression }
 EqualityExpression ::= RelationalExpression { ( "==" | "!=" ) RelationalExpression }
 RelationalExpression ::= AdditiveExpression { ( "<" | ">" | "<=" | ">=" ) AdditiveExpression }
 AdditiveExpression ::= MultiplicativeExpression { ( "+" | "-" ) MultiplicativeExpression }
