@@ -1,4 +1,4 @@
-use std::{fs, iter::Peekable, str::Chars};
+use std::fs;
 
 #[derive(Debug, PartialEq, Clone)]
 enum Token {
@@ -67,40 +67,127 @@ enum Token {
 }
 
 #[derive(Debug)]
+struct TokenFrame {
+    line: usize,
+    column: usize,
+    length: usize,
+}
+
+impl TokenFrame {
+    pub fn print_source_context(&self, source: &str) {
+        let line_str = match source.lines().nth(self.line) {
+            Some(line) => line,
+            None => return,
+        };
+
+        let line_num = (self.line + 1).to_string();
+        let padding_width = line_num.len();
+
+        eprintln!("{:>width$} | {}", line_num, line_str, width = padding_width);
+
+        let indicator_padding = " ".repeat(self.column);
+        let indicator = "^".repeat(self.length.max(1));
+        
+        eprintln!("{} | {}{}", 
+            " ".repeat(padding_width),
+            indicator_padding,
+            indicator
+        );
+    }
+}
+
+#[derive(Debug)]
 enum LexerError {
-    UnterminatedString(String),
-    InvalidNumber(String),
-    UnknownToken(String),
+    UnterminatedString(String, TokenFrame),
+    InvalidNumber(String, TokenFrame),
+    UnknownToken(String, TokenFrame),
 }
 
-struct Lexer<'a> {
-    chars: Peekable<Chars<'a>>,
+impl LexerError {
+    pub fn print_with_source(&self, source: &str) {
+        let (message, frame) = match self {
+            LexerError::UnterminatedString(s, f) => (format!("Unterminated string: \"{}\"", s), f),
+            LexerError::InvalidNumber(s, f) => (format!("Invalid number: {}", s), f),
+            LexerError::UnknownToken(s, f) => (format!("Unknown token: {}", s), f),
+        };
+
+        eprintln!("Error: {} at line {}, column {}",
+            message,
+            frame.line + 1,
+            frame.column + 1
+        );
+
+        frame.print_source_context(source);
+    }
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(source: &'a str) -> Self {
-        Lexer { chars: source.chars().peekable() }
+struct Lexer {
+    chars: Vec<char>,
+    position: usize,
+    line: usize,
+    column: usize,
+}
+
+impl Lexer {
+    pub fn new(source: &str) -> Self {
+        Lexer {
+            chars: source.chars().collect(),
+            position: 0,
+            line: 0,
+            column: 0,
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.position).copied()
+    }
+
+    fn consume(&mut self) -> Option<char> {
+        if let Some(c) = self.chars.get(self.position).copied() {
+            self.position += 1;
+
+            if c == '\n' {
+                self.line+=1;
+                self.column = 0;
+            } else if c != '\r' {
+                self.column += 1;
+            }
+
+            Some(c)
+        } else {
+            None
+        }
     }
 
     fn skip_whitespace(&mut self) {
-        while let Some(&c) = self.chars.peek() {
+        while let Some(c) = self.peek() {
             if c.is_whitespace() {
-                self.chars.next();
+                self.consume();
             } else { break }
         }
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<Token, LexerError>;
+impl Iterator for Lexer {
+    type Item = Result<(Token, TokenFrame), LexerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.skip_whitespace();    
+        self.skip_whitespace();
 
-        let next_char = match self.chars.next() {
+        let start_line = self.line;
+        let start_column = self.column;
+        let start_pos = self.position;
+
+        let next_char = match self.consume() {
             Some(c) => c,
             None => return None
         };
+
+        enum BareError {
+            InvalidNumber(String),
+            UnterminatedString(String),
+            UnknownToken(String),
+        }
 
         let token_result = match next_char {
             '(' => Ok(Token::OpenParen),
@@ -115,117 +202,117 @@ impl<'a> Iterator for Lexer<'a> {
             ':' => Ok(Token::Colon),
             ';' => Ok(Token::Semicolon),
 
-            '=' => match self.chars.peek() {
+            '=' => match self.peek() {
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::Equal)
                 },
                 _ => Ok(Token::Assign)
             },
-            '+' => match self.chars.peek() {
+            '+' => match self.peek() {
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::PlusAssign)
                 },
                 _ => Ok(Token::Plus)
             },
-            '-' => match self.chars.peek() {
+            '-' => match self.peek() {
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::MinusAssign)
                 },
                 _ => Ok(Token::Minus)
             },
-            '*' => match self.chars.peek() {
+            '*' => match self.peek() {
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::StarAssign)
                 },
                 _ => Ok(Token::Star)
             },
-            '/' => match self.chars.peek() {
+            '/' => match self.peek() {
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::SlashAssign)
                 },
                 _ => Ok(Token::Slash)
             },
-            '%' => match self.chars.peek() {
+            '%' => match self.peek() {
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::PercentAssign)
                 },
                 _ => Ok(Token::Percent)
             },
 
 
-            '&' => match self.chars.peek() {
+            '&' => match self.peek() {
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::AmpersandAssign)
                 },
                 Some('&') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::And)
                 }
                 _ => Ok(Token::Ampersand)
             },
-            '|' => match self.chars.peek() {
+            '|' => match self.peek() {
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::PipeAssign)
                 },
                 Some('|') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::Or)
                 }
                 _ => Ok(Token::Pipe)
             },
-            '^' => match self.chars.peek() {
+            '^' => match self.peek() {
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::CaretAssign)
                 },
                 _ => Ok(Token::Caret)
             },
-            '>' => match self.chars.peek() {
+            '>' => match self.peek() {
                 Some('>') => {
-                    self.chars.next();
-                    match self.chars.peek() {
+                    self.consume();
+                    match self.peek() {
                         Some('=') => {
-                            self.chars.next();
+                            self.consume();
                             Ok(Token::RightShiftAssign)
                         },
                         _ => Ok(Token::RightShift)
                     }
                 },
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
 
                     Ok(Token::GreaterThanEqual)
                 }
                 _ => Ok(Token::GreaterThan)
             },
-            '<' => match self.chars.peek() {
+            '<' => match self.peek() {
                 Some('<') => {
-                    self.chars.next();
-                    match self.chars.peek() {
+                    self.consume();
+                    match self.peek() {
                         Some('=') => {
-                            self.chars.next();
+                            self.consume();
                             Ok(Token::LeftShiftAssign)
                         },
                         _ => Ok(Token::LeftShift)
                     }
                 },
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::LessThanEqual)
                 }
                 _ => Ok(Token::LessThan)
             },
-            '!' => match self.chars.peek() {
+            '!' => match self.peek() {
                 Some('=') => {
-                    self.chars.next();
+                    self.consume();
                     Ok(Token::NotEqual)
                 },
                 _ => Ok(Token::Bang)
@@ -234,11 +321,11 @@ impl<'a> Iterator for Lexer<'a> {
                 let mut number_str = String::from(next_char);
                 let mut seen_dot = false;
 
-                while let Some(&c) = self.chars.peek() {
+                while let Some(c) = self.peek() {
                     match c {
-                        c if c.is_digit(10) => number_str.push(self.chars.next().unwrap()),
+                        c if c.is_digit(10) => number_str.push(self.consume().unwrap()),
                         '.' => {
-                            number_str.push(self.chars.next().unwrap());
+                            number_str.push(self.consume().unwrap());
                             seen_dot = true;
                         },
                         _ => break,
@@ -248,20 +335,21 @@ impl<'a> Iterator for Lexer<'a> {
                 if seen_dot {
                     match number_str.parse::<f32>() {
                         Ok(n) => Ok(Token::FloatLiteral(n)),
-                        Err(_) => Err(LexerError::InvalidNumber(number_str))
+                        Err(_) => Err(BareError::InvalidNumber(number_str))
                     }
                 } else {
                     match number_str.parse::<i32>() {
                         Ok(n) => Ok(Token::IntegerLiteral(n)),
-                        Err(_) => Err(LexerError::InvalidNumber(number_str))
+                        Err(_) => Err(BareError::InvalidNumber(number_str))
                     }
                 }
             },
             '"' => {
                 let mut string_str = String::new();
                 let mut closed = false;
-                while let Some(&_) = self.chars.peek() {
-                    let c = self.chars.next().unwrap();
+                while let Some(_) = self.peek() {
+                    let c = self.consume().unwrap();
+                    if c == '\n' { break };
                     if c == '"' { closed = true; break };
                     string_str.push(c);
                 }
@@ -269,16 +357,16 @@ impl<'a> Iterator for Lexer<'a> {
                 if closed {
                     Ok(Token::StringLiteral(string_str))
                 } else {
-                    Err(LexerError::UnterminatedString(string_str))
+                    Err(BareError::UnterminatedString(string_str))
                 }
 
             }
             next_char if next_char.is_alphabetic() || next_char == '_' => {
                 let mut identifier_str = String::from(next_char);
-                while let Some(&c) = self.chars.peek() {
-                    if c.is_whitespace() { break };
+                while let Some(c) = self.peek() {
+                    if c.is_whitespace() { break};
                     if !c.is_alphanumeric() && c != '_' { break };
-                    identifier_str.push(self.chars.next().unwrap());
+                    identifier_str.push(self.consume().unwrap());
                 }
 
                 match identifier_str.as_str() {
@@ -296,19 +384,38 @@ impl<'a> Iterator for Lexer<'a> {
                     _          => Ok(Token::Identifier(identifier_str))
                 }
             },
-            _ => Err(LexerError::UnknownToken(next_char.to_string())),
+            _ => Err(BareError::UnknownToken(next_char.to_string())),
         };
 
-        Some(token_result)
+        let end_pos = self.position;
+        let frame = TokenFrame {
+            line: start_line,
+            column: start_column,
+            length: end_pos - start_pos
+        };
+
+        match token_result {
+            Ok(token) => Some(Ok((token, frame))),
+            Err(bare_err) => {
+                let rich_err = match bare_err {
+                    BareError::InvalidNumber(s) => LexerError::InvalidNumber(s, frame),
+                    BareError::UnterminatedString(s) => LexerError::UnterminatedString(s, frame),
+                    BareError::UnknownToken(s) => LexerError::UnknownToken(s, frame),
+                };
+                Some(Err(rich_err))
+            }
+        }
     }
 }
 
+#[derive(Debug)]
 enum ASTBuilderError {
     UnexpectedToken(Token),
     ExpectedToken(Token),
     UnexpectedEOF,
 }
 
+#[derive(Debug)]
 enum BinaryOperator {
     Or,
     And,
@@ -325,11 +432,13 @@ enum BinaryOperator {
     Modulo,
 }
 
+#[derive(Debug)]
 enum UnaryOperator {
     Not,
     Negate,
 }
 
+#[derive(Debug)]
 enum LiteralValue {
     Integer(i32),
     Float(f32),
@@ -337,6 +446,7 @@ enum LiteralValue {
     Bool(bool)
 }
 
+#[derive(Debug)]
 enum Expression {
     BinaryExpression {
         left: Box<Expression>,
@@ -370,6 +480,7 @@ enum Expression {
     Struct(Vec<(String, Expression)>)
 }
 
+#[derive(Debug)]
 enum Statement {
     If {
         condition: Expression,
@@ -401,13 +512,15 @@ enum Statement {
 
 struct ASTBuilder {
     tokens: Vec<Token>,
+    frames: Vec<TokenFrame>,
     position: usize
 }
 
 impl ASTBuilder {
-    pub fn new(tokens: Vec<Token>) -> ASTBuilder {
+    pub fn new(tokens: Vec<Token>, frames: Vec<TokenFrame>) -> ASTBuilder {
         ASTBuilder {
             tokens,
+            frames,
             position: 0
         }
     }
@@ -469,8 +582,42 @@ impl ASTBuilder {
         Ok(left)
     }
 
-    fn parse_array(&mut self) -> Result<Expression, ASTBuilderError> {}
-    fn parse_object(&mut self) -> Result<Expression, ASTBuilderError> {}
+    fn parse_array(&mut self) -> Result<Expression, ASTBuilderError> {
+        self.expect_token(Token::OpenBracket)?;
+        let mut values = Vec::new();
+        while let Some(token) = self.peek() {
+            if *token == Token::CloseBracket { break };
+
+            let value = self.parse_expression()?;
+            values.push(value);
+
+            if self.peek() != Some(&Token::Comma) { break };
+            self.consume();
+        } 
+        self.expect_token(Token::CloseBracket)?;
+
+        Ok(Expression::Array(values))
+    }
+
+    fn parse_struct(&mut self) -> Result<Expression, ASTBuilderError> {
+        self.expect_token(Token::OpenCurly)?;
+        let mut values = Vec::new();
+        while let Some(token) = self.peek() {
+            if *token == Token::CloseCurly { break };
+
+            let name = self.expect_identifier()?;
+            self.expect_token(Token::Colon)?;
+            let value = self.parse_expression()?;
+
+            values.push((name, value));
+
+            if self.peek() != Some(&Token::Comma) { break };
+            self.consume();
+        }
+        self.expect_token(Token::CloseCurly)?;
+
+        Ok(Expression::Struct(values))
+    }
 
     fn parse_atom(&mut self) -> Result<Expression, ASTBuilderError> {
         match self.peek() {
@@ -480,7 +627,7 @@ impl ASTBuilder {
                 Ok(expr)
             },
             Some(Token::OpenBracket) => self.parse_array(),
-            Some(Token::OpenCurly) => self.parse_object(),
+            Some(Token::OpenCurly) => self.parse_struct(),
             Some(Token::IntegerLiteral(il)) => Ok(Expression::Literal(LiteralValue::Integer(*il))),
             Some(Token::FloatLiteral(fl)) => Ok(Expression::Literal(LiteralValue::Float(*fl))),
             Some(Token::StringLiteral(sl)) => Ok(Expression::Literal(LiteralValue::String(sl.clone()))),
@@ -491,8 +638,44 @@ impl ASTBuilder {
     }
 
     fn parse_primary(&mut self) -> Result<Expression, ASTBuilderError> {
-        let atom = self.parse_atom()?;
-        todo!()
+        let mut left = self.parse_atom()?;
+        while let Some(token) = self.peek() {
+            match *token {
+                Token::OpenBracket => {
+                    self.expect_token(Token::OpenBracket)?;
+                    let expr = self.parse_expression()?;
+
+                    left = Expression::Index { callee: Box::new(left), index: Box::new(expr) };
+                    self.expect_token(Token::CloseBracket)?;
+                },
+                Token::OpenParen => {
+                    self.expect_token(Token::OpenParen)?;
+                    let mut args = Vec::new();
+                    while let Some(token) = self.peek() {
+                        if *token == Token::CloseParen { break };
+
+                        let expr = self.parse_expression()?;
+                        args.push(expr);
+
+                        if self.peek() != Some(&Token::Comma) { break };
+                        self.consume();
+                    }
+                    self.expect_token(Token::CloseParen)?;
+
+                    left = Expression::Call { callee: Box::new(left), args }
+                }
+                Token::Dot => {
+                    while let Some(token) = self.peek() {
+                        if *token != Token::Dot { break };
+                        self.consume();
+                        let name = self.expect_identifier()?;
+                        left = Expression::Field { callee: Box::new(left), name }
+                    }
+                },
+                _ => break,
+            }
+        } 
+        Ok(left)
     }
 
     fn parse_unary(&mut self) -> Result<Expression, ASTBuilderError> {
@@ -591,7 +774,7 @@ impl ASTBuilder {
     }
 
     fn parse_while_statement(&mut self) -> Result<Statement, ASTBuilderError> {
-        self.expect_token(Token::While);
+        self.expect_token(Token::While)?;
 
         let condition = self.parse_expression()?;
         let block = self.parse_block()?;
@@ -602,11 +785,11 @@ impl ASTBuilder {
     // fn parse_for_statement(&mut self)        -> Result<Statement, ASTBuilderError> {}
 
     fn parse_fn_statement(&mut self) -> Result<Statement, ASTBuilderError> {
-        self.expect_token(Token::Fn);
+        self.expect_token(Token::Fn)?;
 
         let name = self.expect_identifier()?;
 
-        self.expect_token(Token::OpenParen);
+        self.expect_token(Token::OpenParen)?;
         let mut params = Vec::new();
         while let Some(token) = self.peek() {
             if *token == Token::CloseParen { break };
@@ -615,6 +798,7 @@ impl ASTBuilder {
             params.push(param);
 
             if self.peek() != Some(&Token::Comma) { break };
+            self.consume();
         }
         self.expect_token(Token::CloseParen)?;
 
@@ -623,7 +807,7 @@ impl ASTBuilder {
         Ok(Statement::FnDefinition { name, params, block })
     }
 
-    fn parse_let_statement(&mut self)        -> Result<Statement, ASTBuilderError> {
+    fn parse_let_statement(&mut self) -> Result<Statement, ASTBuilderError> {
         self.expect_token(Token::Let)?;
 
         let name = self.expect_identifier()?;
@@ -635,33 +819,36 @@ impl ASTBuilder {
             },
             _ => None,
         };
+        self.expect_token(Token::Semicolon)?;
 
         Ok(Statement::Let { name, value })
     }
 
-    fn parse_return_statement(&mut self)     -> Result<Statement, ASTBuilderError> {
-        self.expect_token(Token::Return);
+    fn parse_return_statement(&mut self) -> Result<Statement, ASTBuilderError> {
+        self.expect_token(Token::Return)?;
         let value = match self.peek() {
             Some(Token::Semicolon) => None,
             _ => Some(self.parse_expression()?),
         };
-        if self.peek() == Some(&Token::Semicolon) { self.consume(); }
+        self.expect_token(Token::Semicolon)?;
         Ok(Statement::Return { value })
     }
 
     fn parse_continue_statement(&mut self) -> Result<Statement, ASTBuilderError> {
-        self.expect_token(Token::Continue);
+        self.expect_token(Token::Continue)?;
+        self.expect_token(Token::Semicolon)?;
         Ok(Statement::Continue)
     }
 
     fn parse_break_statement(&mut self)      -> Result<Statement, ASTBuilderError> {
-        self.expect_token(Token::Break);
+        self.expect_token(Token::Break)?;
+        self.expect_token(Token::Semicolon)?;
         Ok(Statement::Break)
     }
 
     fn parse_expression_statement(&mut self) -> Result<Statement, ASTBuilderError> {
         let value = self.parse_expression()?;
-        self.expect_token(Token::Semicolon);
+        self.expect_token(Token::Semicolon)?;
         Ok(Statement::Expression { value })
     }
 
@@ -714,12 +901,13 @@ fn main() -> Result<(), ()> {
     let source_code = fs::read_to_string(filepath)
         .map_err(|e| eprintln!("ERROR: Couldn't read file '{filepath}': {e}"))?;
 
-    let tokens = Lexer::new(&source_code).collect::<Result<Vec<Token>, LexerError>>()
-        .map_err(|e| eprintln!("ERROR: Couldn't tokenize file: {e:?}"))?;
+    let (tokens, token_frames) = Lexer::new(&source_code).collect::<Result<(Vec<Token>, Vec<TokenFrame>), LexerError>>()
+        .map_err(|e| e.print_with_source(&source_code))?;
 
-    for token in tokens {
-        println!("{token:?}");
-    }
+    let tree = ASTBuilder::new(tokens, token_frames).build()
+        .map_err(|e| e.print_with_source(&source_code))?;
+
+    println!("{tree:?}");
 
     Ok(())
 }
