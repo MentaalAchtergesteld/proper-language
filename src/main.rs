@@ -66,7 +66,7 @@ enum Token {
     Break,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct TokenFrame {
     line: usize,
     column: usize,
@@ -76,7 +76,7 @@ struct TokenFrame {
 impl TokenFrame {
     pub fn print_source_context(&self, source: &str) {
         let line_str = match source.lines().nth(self.line) {
-            Some(line) => line,
+            Some(line) => line.replace("\t", " "),
             None => return,
         };
 
@@ -410,9 +410,27 @@ impl Iterator for Lexer {
 
 #[derive(Debug)]
 enum ASTBuilderError {
-    UnexpectedToken(Token),
-    ExpectedToken(Token),
-    UnexpectedEOF,
+    UnexpectedToken(Token, TokenFrame),
+    ExpectedToken(Token, TokenFrame),
+    UnexpectedEOF(TokenFrame),
+}
+
+impl ASTBuilderError {
+    pub fn print_with_source(&self, source: &str) {
+        let (message, frame) = match self {
+            Self::UnexpectedToken(s, f) => (format!("Unexpected token: {:?}", s), f),
+            Self::ExpectedToken(s, f) => (format!("Expected {:?}", s), f),
+            Self::UnexpectedEOF(f) => (format!("Unexpected end of file"), f),
+        };
+
+        eprintln!("Error: {} at line {}, column {}",
+            message,
+            frame.line + 1,
+            frame.column + 1
+        );
+
+        frame.print_source_context(source);
+    }
 }
 
 #[derive(Debug)]
@@ -538,19 +556,21 @@ impl ASTBuilder {
     }
 
     fn expect_token(&mut self, token: Token) -> Result<&Token, ASTBuilderError> {
-        let next = self.consume().ok_or(ASTBuilderError::UnexpectedEOF)?;
+        let frame = self.frames[self.position];
+        let next = self.consume().ok_or(ASTBuilderError::UnexpectedEOF(frame))?;
         if *next == token {
             Ok(next)
         } else {
-            Err(ASTBuilderError::ExpectedToken(token))
+            Err(ASTBuilderError::ExpectedToken(token, frame))
         }
     }
 
     fn expect_identifier(&mut self) -> Result<String, ASTBuilderError> {
-        let next = self.consume().ok_or(ASTBuilderError::UnexpectedEOF)?;
+        let frame = self.frames[self.position];
+        let next = self.consume().ok_or(ASTBuilderError::UnexpectedEOF(frame))?;
         match next {
             Token::Identifier(name) => Ok(name.clone()),
-            _ => Err(ASTBuilderError::ExpectedToken(Token::Identifier(String::new())))
+            _ => Err(ASTBuilderError::ExpectedToken(Token::Identifier(String::new()), frame))
         }
     }
 
@@ -620,20 +640,57 @@ impl ASTBuilder {
     }
 
     fn parse_atom(&mut self) -> Result<Expression, ASTBuilderError> {
+        let pos = self.position;
+
         match self.peek() {
             Some(Token::OpenParen) => {
+                self.consume();
                 let expr = self.parse_expression()?;
                 self.expect_token(Token::CloseParen)?;
                 Ok(expr)
             },
+            
             Some(Token::OpenBracket) => self.parse_array(),
             Some(Token::OpenCurly) => self.parse_struct(),
-            Some(Token::IntegerLiteral(il)) => Ok(Expression::Literal(LiteralValue::Integer(*il))),
-            Some(Token::FloatLiteral(fl)) => Ok(Expression::Literal(LiteralValue::Float(*fl))),
-            Some(Token::StringLiteral(sl)) => Ok(Expression::Literal(LiteralValue::String(sl.clone()))),
-            Some(Token::BoolLiteral(bl)) => Ok(Expression::Literal(LiteralValue::Bool(*bl))),
-            Some(token) => Err(ASTBuilderError::UnexpectedToken(token.clone())),
-            _ => Err(ASTBuilderError::UnexpectedEOF),
+
+            Some(Token::IntegerLiteral(il)) => {
+                let val = *il;
+                self.consume();
+                Ok(Expression::Literal(LiteralValue::Integer(val)))
+            },
+            Some(Token::FloatLiteral(fl)) => {
+                let val = *fl;
+                self.consume();
+                Ok(Expression::Literal(LiteralValue::Float(val)))
+            },
+            Some(Token::StringLiteral(sl)) => {
+                let val = sl.clone();
+                self.consume();
+                Ok(Expression::Literal(LiteralValue::String(val)))
+            },
+            Some(Token::BoolLiteral(bl)) => {
+                let val = *bl;
+                self.consume();
+                Ok(Expression::Literal(LiteralValue::Bool(val)))
+            },
+            Some(Token::Identifier(ident)) => {
+                let val = ident.clone();
+                self.consume();
+                Ok(Expression::Variable(val))
+            }
+            Some(token) => Err(ASTBuilderError::UnexpectedToken(
+                token.clone(), 
+                self.frames[pos].clone()
+            )),
+            
+            None => {
+                let frame = if pos > 0 {
+                    self.frames[pos - 1].clone()
+                } else {
+                    TokenFrame { line: 0, column: 0, length: 0 }
+                };
+                Err(ASTBuilderError::UnexpectedEOF(frame))
+            }
         }
     }
 
@@ -847,9 +904,19 @@ impl ASTBuilder {
     }
 
     fn parse_expression_statement(&mut self) -> Result<Statement, ASTBuilderError> {
-        let value = self.parse_expression()?;
+        let expr = self.parse_expression()?;
+
+        let stmt = if let Some(Token::Assign) = self.peek() {
+            self.consume();
+            let value = self.parse_expression()?;
+            Statement::Expression {
+                value: Expression::Assign { variable: Box::new(expr), value: Box::new(value) }
+            }
+        } else {
+            Statement::Expression { value: expr }
+        };
         self.expect_token(Token::Semicolon)?;
-        Ok(Statement::Expression { value })
+        Ok(stmt)
     }
 
     fn parse_statement(&mut self) -> Result<Statement, ASTBuilderError> {
@@ -863,7 +930,7 @@ impl ASTBuilder {
             Some(Token::Continue) => self.parse_continue_statement(),
             Some(Token::Break)    => self.parse_break_statement(),
             Some(_)               => self.parse_expression_statement(),
-            None                  => Err(ASTBuilderError::UnexpectedEOF),
+            None                  => Err(ASTBuilderError::UnexpectedEOF(self.frames[self.position])),
         } 
     }
 
