@@ -1,6 +1,6 @@
-use std::fs;
+use std::{fs::{self, File}, io::BufWriter};
 
-use crate::{lexer::{Lexer, LexerError, Token}, astbuilder::ASTBuilder};
+use crate::{astbuilder::ASTBuilder, compiler::{disassemble, Compiler}, lexer::{Lexer, LexerError, Token}};
 
 mod lexer;
 mod astbuilder;
@@ -51,7 +51,14 @@ fn main() -> Result<(), ()> {
     let tree = ASTBuilder::new(tokens, token_frames).build()
         .map_err(|e| e.print_with_source(&source_code))?;
 
-    println!("{tree:?}");
+    let (bytecode, constant_pool) = Compiler::new().compile(&tree)
+        .map_err(|e| println!("ERROR: couldn't compile AST: {e:?}"))?;
+
+    let file = File::create("output.asm")
+        .map_err(|e| println!("ERROR: couldn't create output file: {e}"))?;
+    let mut writer = BufWriter::new(file);
+    disassemble(&bytecode, &constant_pool, &mut writer)
+        .map_err(|e| println!("ERROR: couldn't write bytecode to file: {e}"))?;
 
     Ok(())
 }

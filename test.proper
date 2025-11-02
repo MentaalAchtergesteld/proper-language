@@ -1,4 +1,15 @@
-fn add_number(a) {
-    return 10;
-		abc[10+2] = 10;
+fn print(val) {
+	val;
 }
+
+let test = "Hello, World!";
+
+let abc = true;
+if (abc) {
+	print(test);
+} else {
+	while (true) {
+		print("FALSE!!!");
+	}
+}
+
