@@ -1,9 +1,0 @@
-fn test(a) {
-	return a + 20;
-}
-
-if true {
-	let b = test(10);
-} else {
-	test(20);
-}
