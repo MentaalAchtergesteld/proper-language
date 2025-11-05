@@ -1,15 +1,9 @@
-fn print(val) {
-	val;
+fn test(a) {
+	return a + 20;
 }
 
-let test = "Hello, World!";
-
-let abc = true;
-if (abc) {
-	print(test);
+if true {
+	let b = test(10);
 } else {
-	while (true) {
-		print("FALSE!!!");
-	}
+	test(20);
 }
-
