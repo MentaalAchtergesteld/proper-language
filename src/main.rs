@@ -1,10 +1,11 @@
 use std::{fs::{self, File}, io::BufWriter};
 
-use crate::{astbuilder::ASTBuilder, compiler::{disassemble_program, Compiler}, lexer::{Lexer, LexerError, Token}};
+use crate::{astbuilder::ASTBuilder, compiler::{disassemble_program, Compiler}, lexer::{Lexer, LexerError, Token}, vm::VM};
 
 mod lexer;
 mod astbuilder;
 mod compiler;
+mod vm;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TokenFrame {
@@ -59,6 +60,8 @@ fn main() -> Result<(), ()> {
     let mut writer = BufWriter::new(file);
     disassemble_program(&main_proto, &mut writer)
         .map_err(|e| eprintln!("ERROR: couldn't write disassembled program: {e}"))?;
+
+    VM::new(main_proto).run();
 
     Ok(())
 }

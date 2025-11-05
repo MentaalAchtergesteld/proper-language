@@ -1,4 +1,4 @@
-use std::{fmt, io::{self, Write}, rc::Rc};
+use std::{cell::{Cell, Ref, RefCell}, collections::HashMap, fmt, io::{self, Write}, rc::Rc};
 
 use crate::{astbuilder::{BinaryOperator, Expression, LiteralValue, Statement, UnaryOperator}};
 
@@ -101,13 +101,17 @@ impl fmt::Display for Instruction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub enum Value {
     Integer(i32),
     Float(f32),
     String(String),
     Bool(bool),
-    Function(Rc<FunctionPrototype>)
+    Function(Rc<FunctionPrototype>),
+    Closure(Rc<Closure>),
+    Array(Rc<RefCell<Vec<Value>>>),
+    Struct(Rc<RefCell<HashMap<String, Value>>>),
+    Upvalue(Rc<RefCell<Value>>),
 }
 
 impl fmt::Display for Value {
@@ -117,13 +121,66 @@ impl fmt::Display for Value {
             Value::Float(fl) => write!(f, "Float {fl}"),
             Value::String(s) => write!(f, "String {s}"),
             Value::Bool(b) => write!(f, "Bool {b}"),
-            Value::Function(p) => write!(f, "Function <{}> (arity {})", p.name, p.arity)
+            Value::Function(p) => write!(f, "Function <{}> (arity {})", p.name, p.arity),
+            Value::Closure(c) => write!(f, "Closure <{}> (arity {})", c.prototype.name, c.prototype.arity),
+            Value::Array(a) => write!(f, "Array (length {})", a.borrow().len()),
+            Value::Struct(s) => write!(f, "Struct (field count {})", s.borrow().len()),
+            Value::Upvalue(u) => write!(f, "Upvalue {}", u.borrow()),
+        }
+    }
+}
+
+impl Value {
+    pub fn as_integer(&self) -> i32 {
+        match self {
+            Value::Integer(i) => *i,
+            _ => panic!("ERROR: expected integer"),
+        }
+    }
+
+    pub fn as_string(&self) -> String {
+         match self {
+            Value::String(s) => s.clone(),
+            _ => panic!("ERROR: expected string"),
+        }
+    }
+
+    pub fn as_upvalue_object(&self) -> Rc<RefCell<Value>> {
+        match self {
+            Value::Upvalue(rc) => rc.clone(),
+            _ => panic!("ERROR: expected upvalue"),
+        }
+    }
+
+    pub fn as_array(&self) -> Rc<RefCell<Vec<Value>>> {
+         match self {
+            Value::Array(arr) => arr.clone(),
+            _ => panic!("ERROR: expected array"),
+        }
+    }
+
+    pub fn as_struct(&self) -> Rc<RefCell<HashMap<String, Value>>> {
+         match self {
+            Value::Struct(s) => s.clone(),
+            _ => panic!("ERROR: expected struct"),
+        }
+    }
+}
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Integer(a), Value::Integer(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
+            _ => false,
         }
     }
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct FunctionPrototype {
     pub name: String,
     pub arity: usize,
@@ -152,6 +209,12 @@ impl FunctionPrototype {
             constant_pool: Vec::new()
         }
     }
+}
+
+#[derive(Clone)]
+pub struct Closure {
+    pub prototype: Rc<FunctionPrototype>,
+    pub upvalues: Vec<Rc<RefCell<Value>>>
 }
 
 struct Local {
@@ -368,7 +431,7 @@ impl Compiler {
                         self.emit(Instruction::Duplicate(1));
 
                         if let Some(index) = self.resolve_local(&name) {
-                            self.emit(Instruction::StoreUpvalue(index));
+                            self.emit(Instruction::StoreLocal(index));
                             return Ok(());
                         }
 
@@ -400,11 +463,12 @@ impl Compiler {
             },
             Expression::Call { callee, args } => {
                 let arg_count = args.len();
-                self.compile_expression(*callee)?;
 
                 for arg in args {
                     self.compile_expression(arg)?;
                 }
+
+                self.compile_expression(*callee)?;
 
                 self.emit(Instruction::Call(arg_count));
                 Ok(())
@@ -477,12 +541,21 @@ impl Compiler {
             },
             Statement::FnDefinition { name, params, block } => {
                 self.push_context(name.clone(), params.len());
-                let context = self.current_fn_mut();
                 for param in params {
-                    context.create_local(&param)?;
+                    self.current_fn_mut().create_local(&param)?;
                 }
 
                 self.compile_block(block)?;
+
+                let context = self.current_fn_mut();
+                match context.prototype.bytecode.last() {
+                    Some(Instruction::Return) => {},
+                    _ => {
+                        let slot = context.add_constant(Value::Bool(true));
+                        self.emit(Instruction::PushConst(slot));
+                        self.emit(Instruction::Return);
+                    }
+                }
 
                 let finished_context = self.pop_context();
                 let upvalue_count = finished_context.upvalues.len();
@@ -498,15 +571,12 @@ impl Compiler {
                 self.emit(Instruction::CreateClosure(upvalue_count));
 
                 self.current_fn_mut().create_local(&name)?;
-                let slot = self.current_fn().locals.len()-1;
-                self.emit(Instruction::StoreLocal(slot));
 
                 Ok(())
             },
             Statement::Let { name, value } => {
                 self.compile_expression(value)?;
-                let slot = self.current_fn_mut().create_local(&name)?;
-                self.emit(Instruction::StoreLocal(slot)); 
+                self.current_fn_mut().create_local(&name)?;
                 Ok(())
             },
             Statement::Return { value } => {
@@ -535,6 +605,7 @@ impl Compiler {
         for stmt in block {
             self.compile_statement(stmt)?;
         }
+
         self.current_fn_mut().pop_scope();
         Ok(())
     }
@@ -542,6 +613,7 @@ impl Compiler {
     pub fn compile(&mut self, code: Vec<Statement>) -> Result<FunctionPrototype, CompilerError> {
         self.functions = vec![FunctionContext::new_empty()];
         self.compile_block(code)?;
+        self.emit(Instruction::Halt);
         Ok(self.pop_context().prototype)
     }
 }
