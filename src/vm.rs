@@ -1,6 +1,6 @@
 use std::{array, cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::compiler::{Closure, FunctionPrototype, Instruction, Value};
+use crate::{compiler::{Closure, FunctionPrototype, Instruction, Value}, properstd::native_print};
 
 struct CallFrame {
     closure: Rc<Closure>,
@@ -21,10 +21,11 @@ impl CallFrame {
 pub struct VM {
     frames: Vec<CallFrame>,
     stack: Vec<Value>,
+    globals: HashMap<String, Value>,
 }
 
 impl VM {
-    pub fn new(main_proto: FunctionPrototype) -> Self {
+    pub fn new(main_proto: FunctionPrototype, globals: HashMap<String, Value>) -> Self {
         let main_closure = Rc::new(Closure {
             prototype: Rc::new(main_proto),
             upvalues: Vec::new()
@@ -33,7 +34,8 @@ impl VM {
         let main_frame = CallFrame::new(main_closure, 0);
         VM {
             frames: vec![main_frame],
-            stack: Vec::new()
+            stack: Vec::new(),
+            globals
         }
     }
 
@@ -115,6 +117,17 @@ impl VM {
                     let struct_ = struct_val.as_struct();
 
                     let value = struct_.borrow()[&field_name].clone();
+                    self.stack.push(value);
+                },
+
+                Instruction::StoreGlobal(index) => {
+                    let value = self.stack.pop().unwrap();
+                    let field_name = frame.closure.prototype.constant_pool[*index].as_string();
+                    self.globals.insert(field_name, value);
+                },
+                Instruction::LoadGlobal(index) => {
+                    let field_name = frame.closure.prototype.constant_pool[*index].as_string();
+                    let value = self.globals.get(&field_name).unwrap().clone();
                     self.stack.push(value);
                 },
 
@@ -212,8 +225,6 @@ impl VM {
                         (Value::Integer(left), Value::Float(right)) => self.stack.push(Value::Float(left as f32 + right)),
                         _ => todo!("todo: can't ADD non integer or float values")
                     }
-
-                    println!("add result: {}", self.stack.last().unwrap());
                 },
                 Instruction::Subtract => { 
                     let right = self.stack.pop().unwrap();
@@ -280,18 +291,26 @@ impl VM {
                     }
                 },
 
-                Instruction::Call(_) => {
+                Instruction::Call(arg_count) => {
                     let callee = &self.stack.pop().unwrap();
-                    if let Value::Closure(closure) = callee {
-                        let new_frame = CallFrame::new(closure.clone(), self.stack.len()-1);
-                        self.frames.push(new_frame);
-                    } else {
-                        panic!("ERROR: can't call non-function")
+
+                    match callee {
+                        Value::Closure(closure) => {
+                            let new_frame = CallFrame::new(closure.clone(), self.stack.len()-1);
+                            self.frames.push(new_frame);
+                        },
+                        Value::NativeFn(native_fn) => {
+                            let start_index = self.stack.len() - arg_count;
+                            let args = self.stack.drain(start_index..).collect::<Vec<Value>>();
+                            let result = (native_fn.function)(&args);
+                            self.stack.push(result);
+                        },
+                        _ => panic!("ERROR: can't call non-function"),
                     }
                 },
                 Instruction::CreateArray(element_count) => {
                     let start_index = self.stack.len() - element_count;
-                    let elements: Vec<Value> = self.stack.drain(start_index..).collect();
+                    let elements = self.stack.drain(start_index..).collect::<Vec<Value>>();
                     let array = Rc::new(RefCell::new(elements));
                     self.stack.push(Value::Array(array));
 
@@ -310,21 +329,10 @@ impl VM {
 
                 },
                 Instruction::CreateClosure(upvalue_count) => {
-                    // let proto = match &frame.closure.prototype.constant_pool[*index] {
-                    //     Value::Function(proto) => proto.clone(),
-                    //     _ => panic!("ERROR: can't create closure from non-prototype value")
-                    // };
-                    
-                    // &self.print_stack();
-                    // for (i, val) in self.stack.iter().enumerate() {
-                    //     println!("{i}; {val}");
-                    // }
-
                     let mut upvalues = Vec::with_capacity(*upvalue_count);
                     for _ in 0..*upvalue_count {
                         let upvalue = Rc::new(RefCell::new(self.stack.pop().unwrap()));
                         upvalues.push(upvalue);
-                        // upvalues.push(self.stack.pop().unwrap().as_upvalue_object());
                     }
                     upvalues.reverse();
 

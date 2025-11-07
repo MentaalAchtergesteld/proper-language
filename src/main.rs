@@ -1,9 +1,10 @@
-use std::{fs::{self, File}, io::BufWriter};
+use std::{collections::HashMap, fs::{self, File}, io::BufWriter};
 
-use crate::{astbuilder::ASTBuilder, compiler::{disassemble_program, Compiler}, lexer::{Lexer, LexerError, Token}, vm::VM};
+use crate::{astbuilder::ASTBuilder, compiler::{disassemble_program, Compiler, Value}, lexer::{Lexer, LexerError, Token}, properstd::{native_clock, native_print, NativeFunction}, vm::VM};
 
 mod lexer;
 mod astbuilder;
+mod properstd;
 mod compiler;
 mod vm;
 
@@ -52,7 +53,11 @@ fn main() -> Result<(), ()> {
     let tree = ASTBuilder::new(tokens, token_frames).build()
         .map_err(|e| e.print_with_source(&source_code))?;
 
-    let main_proto = Compiler::new().compile(tree)
+    let mut globals = HashMap::new();
+    globals.insert("print".to_string(), Value::NativeFn(NativeFunction::new("print", native_print)));
+    globals.insert("clock".to_string(), Value::NativeFn(NativeFunction::new("clock", native_clock)));
+
+    let main_proto = Compiler::new(globals.keys().cloned().collect()).compile(tree)
         .map_err(|e| eprintln!("ERROR: couldn't compile AST: {e:?}"))?;
 
     let file = File::create("./output.asm")
@@ -61,7 +66,7 @@ fn main() -> Result<(), ()> {
     disassemble_program(&main_proto, &mut writer)
         .map_err(|e| eprintln!("ERROR: couldn't write disassembled program: {e}"))?;
 
-    VM::new(main_proto).run();
+    VM::new(main_proto, globals).run();
 
     Ok(())
 }

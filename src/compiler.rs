@@ -1,6 +1,6 @@
-use std::{cell::{Cell, Ref, RefCell}, collections::HashMap, fmt, io::{self, Write}, rc::Rc};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, fmt, io::{self, Write}, rc::Rc};
 
-use crate::{astbuilder::{BinaryOperator, Expression, LiteralValue, Statement, UnaryOperator}};
+use crate::{astbuilder::{BinaryOperator, Expression, LiteralValue, Statement, UnaryOperator}, properstd::NativeFunction};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
@@ -17,6 +17,9 @@ pub enum Instruction {
 
     StoreField(usize),
     LoadField(usize),
+
+    StoreGlobal(usize),
+    LoadGlobal(usize),
     
     Or,
     And,
@@ -67,6 +70,9 @@ impl fmt::Display for Instruction {
             Instruction::StoreField(idx) => write!(f, "StoreField {idx}"),
             Instruction::LoadField(idx) => write!(f, "StoreField {idx}"),
 
+            Instruction::StoreGlobal(idx) => write!(f, "StoreGlobal {idx}"),
+            Instruction::LoadGlobal(idx) => write!(f, "LoadGlobal {idx}"),
+
             Instruction::Or => write!(f, "Or"),
             Instruction::And=> write!(f, "And"),
             Instruction::Equal => write!(f, "Equal"),
@@ -111,7 +117,7 @@ pub enum Value {
     Closure(Rc<Closure>),
     Array(Rc<RefCell<Vec<Value>>>),
     Struct(Rc<RefCell<HashMap<String, Value>>>),
-    Upvalue(Rc<RefCell<Value>>),
+    NativeFn(NativeFunction),
 }
 
 impl fmt::Display for Value {
@@ -125,7 +131,7 @@ impl fmt::Display for Value {
             Value::Closure(c) => write!(f, "Closure <{}> (arity {})", c.prototype.name, c.prototype.arity),
             Value::Array(a) => write!(f, "Array (length {})", a.borrow().len()),
             Value::Struct(s) => write!(f, "Struct (field count {})", s.borrow().len()),
-            Value::Upvalue(u) => write!(f, "Upvalue {}", u.borrow()),
+            Value::NativeFn(nf) => write!(f, "NativeFn {:?}", nf),
         }
     }
 }
@@ -144,13 +150,13 @@ impl Value {
             _ => panic!("ERROR: expected string"),
         }
     }
-
-    pub fn as_upvalue_object(&self) -> Rc<RefCell<Value>> {
-        match self {
-            Value::Upvalue(rc) => rc.clone(),
-            _ => panic!("ERROR: expected upvalue"),
-        }
-    }
+    //
+    // pub fn as_upvalue_object(&self) -> Rc<RefCell<Value>> {
+    //     match self {
+    //         Value::Upvalue(rc) => rc.clone(),
+    //         _ => panic!("ERROR: expected upvalue"),
+    //     }
+    // }
 
     pub fn as_array(&self) -> Rc<RefCell<Vec<Value>>> {
          match self {
@@ -300,12 +306,13 @@ impl FunctionContext {
 }
 
 pub struct Compiler {
-    functions: Vec<FunctionContext>
+    functions: Vec<FunctionContext>,
+    globals: HashSet<String>,
 }
 
 impl Compiler {
-    pub fn new() -> Self {
-        Self { functions: vec![FunctionContext::new_empty()] }
+    pub fn new(globals: HashSet<String>) -> Self {
+        Self { functions: vec![FunctionContext::new_empty()], globals }
     }
 
     fn current_fn(&self) -> &FunctionContext {
@@ -371,6 +378,12 @@ impl Compiler {
 
         if let Some(index) = self.resolve_upvalue(name) {
             self.emit(Instruction::LoadUpvalue(index));
+            return Ok(())
+        }
+
+        if self.globals.contains(name) {
+            let name_index = self.current_fn_mut().add_constant(Value::String(name.to_string()));
+            self.emit(Instruction::LoadGlobal(name_index));
             return Ok(())
         }
 
