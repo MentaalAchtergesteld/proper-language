@@ -1,53 +1,45 @@
-use crate::TokenFrame;
+use crate::peekablecursor::PeekableCursor;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug)]
 pub enum Token {
-    OpenParen,
-    CloseParen,
-    OpenCurly,
-    CloseCurly,
-    OpenBracket,
-    CloseBracket,
-    
-    Comma,
-    Dot,
-    Colon,
-    Semicolon,
+    OpenParen,    // (
+    CloseParen,   // )
+    OpenCurly,    // {
+    CloseCurly,   // }
+    OpenBracket,  // [
+    CloseBracket, // ]
 
-    Assign,
+    Comma,         // ,
+    Dot,           // .
+    Semicolon,     // ;
+    Underscore,    // _
+    Colon,         // :
+    PathSeperator, // ::
+    Range,         // ..
+    QuestionMark,  // ?
+    Arrow,         // ->
+    FatArrow,      // =>
 
-    Plus,
-    PlusAssign,
-    Minus,
-    MinusAssign,
-    Star,
-    StarAssign,
-    Slash,
-    SlashAssign,
-    Percent,
-    PercentAssign,
+    Assign,  // =
+    Plus,    // +
+    Minus,   // -
+    Star,    // *
+    Slash,   // /
+    Percent, // %
 
-    Ampersand,
-    AmpersandAssign,
-    Pipe,
-    PipeAssign,
-    Caret,
-    CaretAssign,
-    LeftShift,
-    LeftShiftAssign,
-    RightShift,
-    RightShiftAssign,
+    Ampersand, // &
+    Pipe,      // |
+    Caret,     // ^
 
-    And,
-    Or,
-    Bang,
+    And,  // &&
+    Or,   // ||
+    Bang, // !
 
-    Equal,
-    NotEqual,
-    LessThan,
-    LessThanEqual,
-    GreaterThan,
-    GreaterThanEqual,
+    Equal,    // ==
+    NotEqual, // !=
+
+    LessThan,    // <
+    GreaterThan, // >
 
     IntegerLiteral(i32),
     FloatLiteral(f32),
@@ -55,325 +47,192 @@ pub enum Token {
     BoolLiteral(bool),
     Identifier(String),
 
+    Let,
+    Fn,
+    Struct,
+    Enum,
     If,
     Else,
+    Match,
     While,
-    // For,
-    Fn,
-    Let,
+    For,
+    In,
     Return,
-    Continue,
     Break,
+    Continue,
+
+    Eof
 }
 
 #[derive(Debug)]
 pub enum LexerError {
-    UnterminatedString(String, TokenFrame),
-    InvalidNumber(String, TokenFrame),
-    UnknownToken(String, TokenFrame),
+    InvalidNumber(String),
+    UnterminatedString(String),
+    UnknownToken(String),
 }
 
-impl LexerError {
-    pub fn print_with_source(&self, source: &str) {
-        let (message, frame) = match self {
-            LexerError::UnterminatedString(s, f) => (format!("Unterminated string: \"{}\"", s), f),
-            LexerError::InvalidNumber(s, f) => (format!("Invalid number: {}", s), f),
-            LexerError::UnknownToken(s, f) => (format!("Unknown token: {}", s), f),
-        };
-
-        eprintln!("Error: {} at line {}, column {}",
-            message,
-            frame.line + 1,
-            frame.column + 1
-        );
-
-        frame.print_source_context(source);
-    }
+pub struct Lexer<'a> {
+    source: PeekableCursor<'a, char>,
+    emitted_eof: bool,
 }
 
-pub struct Lexer {
-    chars: Vec<char>,
-    position: usize,
-    line: usize,
-    column: usize,
-}
-
-impl Lexer {
-    pub fn new(source: &str) -> Self {
-        Lexer {
-            chars: source.chars().collect(),
-            position: 0,
-            line: 0,
-            column: 0,
-        }
+impl<'a> Lexer<'a> {
+    pub fn new(source: &'a [char]) -> Self {
+        Self { source: PeekableCursor::new(source), emitted_eof: false }
     }
 
-    fn peek(&self) -> Option<char> {
-        self.chars.get(self.position).copied()
+    fn consume_and_return(&mut self, token: Token) -> Token {
+        self.source.consume();
+        token
     }
 
-    fn consume(&mut self) -> Option<char> {
-        if let Some(c) = self.chars.get(self.position).copied() {
-            self.position += 1;
+    fn parse_token(&mut self) -> Result<Token, LexerError> {
+        self.source.consume_while(|c| c.is_whitespace());
+        if self.source.is_at_end() { self.emitted_eof = true; return Ok(Token::Eof) }
 
-            if c == '\n' {
-                self.line+=1;
-                self.column = 0;
-            } else if c != '\r' {
-                self.column += 1;
-            }
+        let char = self.source.peek().unwrap();
 
-            Some(c)
-        } else {
-            None
-        }
-    }
+        match char {
+            '{' => Ok(self.consume_and_return(Token::OpenCurly)), 
+            '}' => Ok(self.consume_and_return(Token::CloseCurly)), 
+            '(' => Ok(self.consume_and_return(Token::OpenParen)), 
+            ')' => Ok(self.consume_and_return(Token::CloseParen)), 
+            '[' => Ok(self.consume_and_return(Token::OpenBracket)), 
+            ']' => Ok(self.consume_and_return(Token::CloseBracket)), 
 
-    fn skip_whitespace(&mut self) {
-        while let Some(c) = self.peek() {
-            if c.is_whitespace() {
-                self.consume();
-            } else { break }
-        }
-    }
-}
-
-impl Iterator for Lexer {
-    type Item = Result<(Token, TokenFrame), LexerError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.skip_whitespace();
-
-        let start_line = self.line;
-        let start_column = self.column;
-        let start_pos = self.position;
-
-        let next_char = match self.consume() {
-            Some(c) => c,
-            None => return None
-        };
-
-        enum BareError {
-            InvalidNumber(String),
-            UnterminatedString(String),
-            UnknownToken(String),
-        }
-
-        let token_result = match next_char {
-            '(' => Ok(Token::OpenParen),
-            ')' => Ok(Token::CloseParen),
-            '{' => Ok(Token::OpenCurly),
-            '}' => Ok(Token::CloseCurly),
-            '[' => Ok(Token::OpenBracket),
-            ']' => Ok(Token::CloseBracket),
-
-            ',' => Ok(Token::Comma),
-            '.' => Ok(Token::Dot),
-            ':' => Ok(Token::Colon),
-            ';' => Ok(Token::Semicolon),
-
-            '=' => match self.peek() {
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::Equal)
-                },
-                _ => Ok(Token::Assign)
-            },
-            '+' => match self.peek() {
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::PlusAssign)
-                },
-                _ => Ok(Token::Plus)
-            },
-            '-' => match self.peek() {
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::MinusAssign)
-                },
-                _ => Ok(Token::Minus)
-            },
-            '*' => match self.peek() {
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::StarAssign)
-                },
-                _ => Ok(Token::Star)
-            },
-            '/' => match self.peek() {
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::SlashAssign)
-                },
-                _ => Ok(Token::Slash)
-            },
-            '%' => match self.peek() {
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::PercentAssign)
-                },
-                _ => Ok(Token::Percent)
-            },
-
-
-            '&' => match self.peek() {
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::AmpersandAssign)
-                },
-                Some('&') => {
-                    self.consume();
-                    Ok(Token::And)
+            ',' => Ok(self.consume_and_return(Token::Comma)), 
+            '.' => {
+                self.source.consume();
+                match self.source.peek() {
+                    Some('.') => Ok(self.consume_and_return(Token::Range)),
+                    _ => Ok(Token::Dot)
                 }
-                _ => Ok(Token::Ampersand)
-            },
-            '|' => match self.peek() {
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::PipeAssign)
-                },
-                Some('|') => {
-                    self.consume();
-                    Ok(Token::Or)
-                }
-                _ => Ok(Token::Pipe)
-            },
-            '^' => match self.peek() {
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::CaretAssign)
-                },
-                _ => Ok(Token::Caret)
-            },
-            '>' => match self.peek() {
-                Some('>') => {
-                    self.consume();
-                    match self.peek() {
-                        Some('=') => {
-                            self.consume();
-                            Ok(Token::RightShiftAssign)
-                        },
-                        _ => Ok(Token::RightShift)
-                    }
-                },
-                Some('=') => {
-                    self.consume();
+            }, 
+            ';' => Ok(self.consume_and_return(Token::Semicolon)), 
 
-                    Ok(Token::GreaterThanEqual)
+            ':' => {
+                self.source.consume();
+                match self.source.peek() {
+                    Some(':') => Ok(self.consume_and_return(Token::PathSeperator)),
+                    _   => Ok(Token::Colon)
                 }
-                _ => Ok(Token::GreaterThan)
             },
-            '<' => match self.peek() {
-                Some('<') => {
-                    self.consume();
-                    match self.peek() {
-                        Some('=') => {
-                            self.consume();
-                            Ok(Token::LeftShiftAssign)
-                        },
-                        _ => Ok(Token::LeftShift)
-                    }
-                },
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::LessThanEqual)
-                }
-                _ => Ok(Token::LessThan)
-            },
-            '!' => match self.peek() {
-                Some('=') => {
-                    self.consume();
-                    Ok(Token::NotEqual)
-                },
-                _ => Ok(Token::Bang)
-            },
-            next_char if next_char.is_digit(10) => {
-                let mut number_str = String::from(next_char);
-                let mut seen_dot = false;
 
-                while let Some(c) = self.peek() {
-                    match c {
-                        c if c.is_digit(10) => number_str.push(self.consume().unwrap()),
-                        '.' => {
-                            number_str.push(self.consume().unwrap());
-                            seen_dot = true;
-                        },
-                        _ => break,
-                    }
-                }
+            '?' => Ok(self.consume_and_return(Token::QuestionMark)),
 
-                if seen_dot {
-                    match number_str.parse::<f32>() {
-                        Ok(n) => Ok(Token::FloatLiteral(n)),
-                        Err(_) => Err(BareError::InvalidNumber(number_str))
-                    }
+            '=' => {
+                self.source.consume();
+                match self.source.peek() {
+                    Some('>') => Ok(self.consume_and_return(Token::FatArrow)),
+                    Some('=') => Ok(self.consume_and_return(Token::Equal)),
+                    _         => Ok(Token::Assign)
+                }
+            },
+            '-' => {
+                self.source.consume();
+                match self.source.peek() {
+                    Some('>') => Ok(self.consume_and_return(Token::Arrow)),
+                    _         => Ok(Token::Minus),
+                }
+            },
+            '+' => Ok(self.consume_and_return(Token::Plus)),
+            '*' => Ok(self.consume_and_return(Token::Star)),
+            '/' => Ok(self.consume_and_return(Token::Slash)),
+            '%' => Ok(self.consume_and_return(Token::Percent)),
+            '&' => {
+                self.source.consume();
+                match self.source.peek() {
+                    Some('&') => Ok(self.consume_and_return(Token::And)),
+                    _         => Ok(Token::Ampersand)
+                }
+            },
+            '|' => {
+                self.source.consume();
+                match self.source.peek() {
+                    Some('|') => Ok(self.consume_and_return(Token::Or)),
+                    _         => Ok(Token::Pipe)
+                }
+            },
+            '^' => Ok(self.consume_and_return(Token::Caret)),
+            '!' => {
+                self.source.consume();
+                match self.source.peek() {
+                    Some('=') => Ok(self.consume_and_return(Token::NotEqual)),
+                    _         => Ok(Token::Bang)
+                }
+            },
+            '>' => Ok(self.consume_and_return(Token::GreaterThan)),
+            '<' => Ok(self.consume_and_return(Token::LessThan)),
+
+            '0'..='9' => {
+                let mut number = self.source.consume_while(|c| c.is_numeric()).iter().collect::<String>();
+                if let Some('.') = self.source.peek() {
+                    self.source.consume();
+                    let decimals = self.source.consume_while(|c| c.is_numeric()).iter().collect::<String>();
+                    number.push_str(".");
+                    number.push_str(&decimals);
+
+                    number.parse::<f32>()
+                        .map(|f| Token::FloatLiteral(f))
+                        .map_err(|_| LexerError::InvalidNumber(number))
                 } else {
-                    match number_str.parse::<i32>() {
-                        Ok(n) => Ok(Token::IntegerLiteral(n)),
-                        Err(_) => Err(BareError::InvalidNumber(number_str))
-                    }
+                    number.parse::<i32>()
+                        .map(|f| Token::IntegerLiteral(f))
+                        .map_err(|_| LexerError::InvalidNumber(number))
                 }
             },
             '"' => {
-                let mut string_str = String::new();
-                let mut closed = false;
-                while let Some(_) = self.peek() {
-                    let c = self.consume().unwrap();
-                    if c == '\n' { break };
-                    if c == '"' { closed = true; break };
-                    string_str.push(c);
+                self.source.consume();
+                let string = self.source.consume_while(|c| c != &'"').iter().collect::<String>();
+                if self.source.peek().is_none() {
+                    return Err(LexerError::UnterminatedString(string));
                 }
+                self.source.consume();
+                Ok(Token::StringLiteral(string))
+            },
+            'a'..='z' | 'A'..='Z' | '_' => {
+                let identifier = self.source
+                    .consume_while(|c| c.is_alphanumeric() || c == &'_')
+                    .iter()
+                    .collect::<String>();
 
-                if closed {
-                    Ok(Token::StringLiteral(string_str))
-                } else {
-                    Err(BareError::UnterminatedString(string_str))
-                }
+                match identifier.as_str() {
+                    "true" => Ok(Token::BoolLiteral(true)),
+                    "false" => Ok(Token::BoolLiteral(false)),
 
-            }
-            next_char if next_char.is_alphabetic() || next_char == '_' => {
-                let mut identifier_str = String::from(next_char);
-                while let Some(c) = self.peek() {
-                    if c.is_whitespace() { break};
-                    if !c.is_alphanumeric() && c != '_' { break };
-                    identifier_str.push(self.consume().unwrap());
-                }
-
-                match identifier_str.as_str() {
-                    "true"     => Ok(Token::BoolLiteral(true)),
-                    "false"    => Ok(Token::BoolLiteral(false)),
+                    "let"      => Ok(Token::Let),
+                    "fn"       => Ok(Token::Fn),
+                    "struct"   => Ok(Token::Struct),
+                    "enum"     => Ok(Token::Enum),
                     "if"       => Ok(Token::If),
                     "else"     => Ok(Token::Else),
+                    "match"    => Ok(Token::Match),
                     "while"    => Ok(Token::While),
-                    // "for"      => Ok(Token::For),
-                    "fn"       => Ok(Token::Fn),
-                    "let"      => Ok(Token::Let),
+                    "for"      => Ok(Token::For),
+                    "in"       => Ok(Token::In),
                     "return"   => Ok(Token::Return),
-                    "continue" => Ok(Token::Continue),
                     "break"    => Ok(Token::Break),
-                    _          => Ok(Token::Identifier(identifier_str))
+                    "continue" => Ok(Token::Continue),
+                    "_"        => Ok(Token::Underscore),
+                    _ => Ok(Token::Identifier(identifier)),
                 }
-            },
-            _ => Err(BareError::UnknownToken(next_char.to_string())),
-        };
-
-        let end_pos = self.position;
-        let frame = TokenFrame {
-            line: start_line,
-            column: start_column,
-            length: end_pos - start_pos
-        };
-
-        match token_result {
-            Ok(token) => Some(Ok((token, frame))),
-            Err(bare_err) => {
-                let rich_err = match bare_err {
-                    BareError::InvalidNumber(s) => LexerError::InvalidNumber(s, frame),
-                    BareError::UnterminatedString(s) => LexerError::UnterminatedString(s, frame),
-                    BareError::UnknownToken(s) => LexerError::UnknownToken(s, frame),
-                };
-                Some(Err(rich_err))
             }
+            _ => {
+                let c = self.source.consume().unwrap();
+                Err(LexerError::UnknownToken(c.to_string()))
+            },
+        }
+    }
+}
+
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Result<Token, LexerError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.emitted_eof {
+            None
+        } else {
+            Some(self.parse_token())
         }
     }
 }

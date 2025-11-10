@@ -1,42 +1,10 @@
-use std::{collections::HashMap, fs::{self, File}, io::BufWriter};
+use std::fs;
 
-use crate::{astbuilder::ASTBuilder, compiler::{disassemble_program, Compiler, Value}, lexer::{Lexer, LexerError, Token}, properstd::{native_clock, native_print, NativeFunction}, vm::VM};
+use crate::{astbuilder::AstBuilder, lexer::{Lexer, LexerError, Token}};
 
-mod lexer;
+mod peekablecursor;
 mod astbuilder;
-mod properstd;
-mod compiler;
-mod vm;
-
-#[derive(Debug, Clone, Copy)]
-pub struct TokenFrame {
-    line: usize,
-    column: usize,
-    length: usize,
-}
-
-impl TokenFrame {
-    pub fn print_source_context(&self, source: &str) {
-        let line_str = match source.lines().nth(self.line) {
-            Some(line) => line.replace("\t", " "),
-            None => return,
-        };
-
-        let line_num = (self.line + 1).to_string();
-        let padding_width = line_num.len();
-
-        eprintln!("{:>width$} | {}", line_num, line_str, width = padding_width);
-
-        let indicator_padding = " ".repeat(self.column);
-        let indicator = "^".repeat(self.length.max(1));
-        
-        eprintln!("{} | {}{}", 
-            " ".repeat(padding_width),
-            indicator_padding,
-            indicator
-        );
-    }
-}
+mod lexer;
 
 fn main() -> Result<(), ()> {
     let args = std::env::args().collect::<Vec<String>>();
@@ -47,26 +15,18 @@ fn main() -> Result<(), ()> {
     let source_code = fs::read_to_string(filepath)
         .map_err(|e| eprintln!("ERROR: Couldn't read file '{filepath}': {e}"))?;
 
-    let (tokens, token_frames) = Lexer::new(&source_code).collect::<Result<(Vec<Token>, Vec<TokenFrame>), LexerError>>()
-        .map_err(|e| e.print_with_source(&source_code))?;
+    let chars = source_code.chars().collect::<Vec<char>>();
 
-    let tree = ASTBuilder::new(tokens, token_frames).build()
-        .map_err(|e| e.print_with_source(&source_code))?;
+    let tokens = Lexer::new(&chars).collect::<Result<Vec<Token>, LexerError>>()
+        .map_err(|e| eprintln!("ERROR: couldn't tokenize source: {e:?}"))?;
 
-    let mut globals = HashMap::new();
-    globals.insert("print".to_string(), Value::NativeFn(NativeFunction::new("print", native_print)));
-    globals.insert("clock".to_string(), Value::NativeFn(NativeFunction::new("clock", native_clock)));
+    println!("{tokens:?}");
 
-    let main_proto = Compiler::new(globals.keys().cloned().collect()).compile(tree)
-        .map_err(|e| eprintln!("ERROR: couldn't compile AST: {e:?}"))?;
+    let ast_tree = AstBuilder::new(&tokens).build()
+        .map_err(|e| eprintln!("ERROR: couldn't build AST tree: {e:?}"))?;
 
-    let file = File::create("./output.asm")
-        .map_err(|e| eprintln!("ERROR: couldn't create output file: {e}"))?;
-    let mut writer = BufWriter::new(file);
-    disassemble_program(&main_proto, &mut writer)
-        .map_err(|e| eprintln!("ERROR: couldn't write disassembled program: {e}"))?;
+    println!("{ast_tree:?}");
 
-    VM::new(main_proto, globals).run();
 
     Ok(())
 }
