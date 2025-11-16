@@ -1,6 +1,6 @@
 use crate::peekablecursor::PeekableCursor;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     OpenParen,    // (
     CloseParen,   // )
@@ -50,6 +50,8 @@ pub enum Token {
     Let,
     Fn,
     Struct,
+    Trait,
+    Impl,
     Enum,
     If,
     Else,
@@ -203,6 +205,8 @@ impl<'a> Lexer<'a> {
                     "let"      => Ok(Token::Let),
                     "fn"       => Ok(Token::Fn),
                     "struct"   => Ok(Token::Struct),
+                    "trait"    => Ok(Token::Trait),
+                    "impl"     => Ok(Token::Impl),
                     "enum"     => Ok(Token::Enum),
                     "if"       => Ok(Token::If),
                     "else"     => Ok(Token::Else),
