@@ -1,3 +1,5 @@
+use std::panic;
+
 use crate::{astbuilder, lexer};
 
 fn tokenize(source: &str) -> Vec<lexer::Token> {
@@ -243,5 +245,205 @@ fn test_trait_definition() {
             assert_eq!(t.functions[0].name, "get_position");
         },
         _ => panic!("Expected TraitDefinition")
+    }
+}
+
+#[test]
+fn test_impl_block() {
+    use crate::astbuilder::*;
+    let ast = parse("impl Point { fn get_position() -> (int, int) { (self.x, self.y) } }");
+    match &ast[0] {
+        Statement::ImplBlock(i) => {
+            assert!(i.trait_path.is_none());
+            assert_eq!(i.type_path.get_first_name().unwrap(), "Point");
+            assert_eq!(i.functions.len(), 1);
+        },
+        _ => panic!("Expected ImplBlock")
+    }
+
+    let ast = parse("impl Position for Point { fn get_position() -> (int, int) { (self.x, self.y) } }");
+    match &ast[0] {
+        Statement::ImplBlock(i) => {
+            assert!(i.trait_path.is_some());
+            let trait_path = i.trait_path.clone().unwrap();
+            assert_eq!(trait_path.get_first_name().unwrap(), "Position");
+            assert_eq!(i.functions.len(), 1);
+        },
+        _ => panic!("Expected ImplBlock")
+    }
+}
+
+#[test]
+fn test_return() {
+    use crate::astbuilder::*;
+
+    // Return without keyword
+    let ast = parse("10 + 200");
+    match &ast[0] {
+        Statement::Return(expr) => {
+            let (left, op, right) = if let Expression::Binary { left, op, right } = expr {
+                (left, op, right)
+            } else { panic!("Expected BinaryExpression") };
+
+            assert!(matches!(&**left, Expression::Literal(LiteralValue::Integer(10))));
+            assert!(matches!(op, BinaryOperator::Add));
+            assert!(matches!(&**right, Expression::Literal(LiteralValue::Integer(200))));
+        },
+        _ => panic!("Expected Return")
+    }
+
+    let ast = parse("return 500 * 30");
+    match &ast[0] {
+        Statement::Return(expr) => {
+            let (left, op, right) = if let Expression::Binary { left, op, right } = expr {
+                (left, op, right)
+            } else { panic!("Expected BinaryExpression") };
+
+            assert!(matches!(&**left, Expression::Literal(LiteralValue::Integer(500))));
+            assert!(matches!(op, BinaryOperator::Multiply));
+            assert!(matches!(&**right, Expression::Literal(LiteralValue::Integer(30))));
+        },
+        _ => panic!("Expected Return")
+    }
+}
+
+#[test]
+fn test_operator_precedence() {
+    use crate::astbuilder::*;
+
+    let ast = parse("1 + 2 * 3;");
+    let expr = match &ast[0] {
+        Statement::ExpressionStatement(expr) => expr,
+        _ => panic!("Expected ExpressionStatement")
+    };
+
+    let (left, op, right) = match expr {
+        Expression::Binary { left, op, right } => (left, op, right),
+        _ => panic!("Expected BinaryExpression")
+    };
+    assert!(matches!(op, BinaryOperator::Add));
+    assert!(matches!(**left, Expression::Literal(LiteralValue::Integer(1))));
+
+    let (left, op, right) = match &**right {
+        Expression::Binary { left, op, right } => (left, op, right),
+        _ => panic!("Expected BinaryExpression")
+    };
+    assert!(matches!(op, BinaryOperator::Multiply));
+    assert!(matches!(**left, Expression::Literal(LiteralValue::Integer(2))));
+    assert!(matches!(**right, Expression::Literal(LiteralValue::Integer(3))));
+
+    let ast = parse("(1 + 2) * 3;");
+    let expr = match &ast[0] {
+        Statement::ExpressionStatement(expr) => expr,
+        _ => panic!("Expected ExpressionStatement")
+    };
+
+    let op = match expr {
+        Expression::Binary { op, .. } => op,
+        _ => panic!("Expected BinaryExpression")
+    };
+    assert!(matches!(op, BinaryOperator::Multiply));
+}
+
+#[test]
+fn test_postfix_chains() {
+    use crate::astbuilder::*;
+
+    let ast = parse("a.b[0]();");
+
+    let expr = match &ast[0] {
+        Statement::ExpressionStatement(expr) => expr,
+        _ => panic!("Expected ExpressionStatement")
+    };
+
+    let call_callee = match expr {
+        Expression::Call { callee, .. } => callee,
+        _ => panic!("Expected CallExpression")
+    };
+
+    let index_callee = match &**call_callee {
+        Expression::Index { callee, .. } => callee,
+        _ => panic!("Expected IndexExpression")
+    };
+
+    let field = match &**index_callee {
+        Expression::Field { field, .. } => field,
+        _ => panic!("Expected FieldExpression")
+    };
+    assert_eq!(field, "b");
+}
+
+#[test]
+fn test_control_flow() {
+    use crate::astbuilder::*;
+
+    let ast = parse("if x { 1 } else { 2 };");
+
+    match &ast[0] {
+        Statement::ExpressionStatement(Expression::If { condition, then_branch, else_branch }) => {
+            assert!(matches!(**condition, Expression::Path(..)));
+            assert!(matches!(**then_branch, Expression::Block { .. }));
+            assert!(else_branch.is_some());
+        },
+        _ => panic!("Expected IfExpression")
+    }
+
+    let ast = parse("while true { break; };");
+    match &ast[0] {
+        Statement::ExpressionStatement(Expression::While { condition, body }) => {
+            assert!(matches!(**condition, Expression::Literal(LiteralValue::Bool(true))));
+
+            match &**body {
+                Expression::Block { statements, .. } => assert!(matches!(statements[0], Statement::Break)),
+                _ => panic!("Expected BlockExpression")
+            };
+        },
+        _ => panic!("Expected WhileExpression")
+    }
+}
+
+#[test]
+fn test_match_expression() {
+    use crate::astbuilder::*;
+
+    let ast = parse("match x { 1 => true, _ => false };");
+
+    match &ast[0] {
+        Statement::ExpressionStatement(Expression::Match { value, arms }) => {
+            assert!(matches!(**value, Expression::Path(..)));
+            assert_eq!(arms.len(), 2);
+
+            let arm1 = &arms[0];
+            assert!(matches!(arm1.pattern, Pattern::Literal(LiteralValue::Integer(1))));
+            assert!(matches!(arm1.body, Expression::Literal(LiteralValue::Bool(true))));
+
+            let arm2 = &arms[1];
+            assert!(matches!(arm2.pattern, Pattern::Wildcard));
+        },
+        _ => panic!("Expected MatchExpression")
+    }
+}
+
+#[test]
+fn test_generics_parsing() {
+    use crate::astbuilder::*;
+
+    let ast = parse("let a: Vec<Vec<int>> = [];");
+    match &ast[0] {
+        Statement::Let { type_annotation, .. } => {
+            assert!(type_annotation.is_some());
+        },
+        _ => panic!("Expected LetStatement"),
+    }
+
+    let ast = parse("1 >> 2;");
+    match &ast[0] {
+        Statement::ExpressionStatement(expr) => match expr {
+            Expression::Binary { op, .. } => {
+                assert!(matches!(op, BinaryOperator::RightShift));
+            }
+            _ => panic!("Expected BinaryExpression"),
+        }
+        _ => panic!("Expected ExpressionStatement"),
     }
 }

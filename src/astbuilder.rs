@@ -172,6 +172,8 @@ pub enum Statement {
     ImplBlock(ImplBlock),
     ExpressionStatement(Expression),
     Return(Expression),
+    Break,
+    Continue,
 }
 
 #[derive(Clone, Debug)]
@@ -676,7 +678,7 @@ impl<'a> AstBuilder<'a> {
             if self.tokens.peek() != Some(&Token::Comma) { break }
             self.tokens.consume();
         }
-        self.expect(Token::OpenCurly)?;
+        self.expect(Token::CloseCurly)?;
 
         Ok(Expression::Match { value, arms })
     }
@@ -724,24 +726,32 @@ impl<'a> AstBuilder<'a> {
             Token::Identifier(_) => {
                 let path = self.parse_path()?;
 
-                if self.tokens.peek() == Some(&Token::OpenCurly) {
-                    self.tokens.consume();
+                if self.tokens.peek() != Some(&Token::OpenCurly) { return Ok(Expression::Path(path)) }
 
-                    let mut fields = Vec::new();
-                    while self.tokens.peek() != Some(&Token::CloseCurly) {
-                        let name = self.expect_identifier()?;
-                        self.expect(Token::Colon)?;
-                        let expr = self.parse_expression()?;
-                        fields.push((name, expr));
+                let is_struct = match (self.tokens.peek_n(1), self.tokens.peek_n(2)) {
+                    (Some(Token::Identifier(_)), Some(Token::Colon)) => true,
+                    (Some(Token::CloseCurly), _) => true,
+                    _ => false,
+                };
 
-                        if self.tokens.peek() != Some(&Token::Comma) { break }
-                        self.expect(Token::Comma)?;
-                    }
+                if !is_struct { return Ok(Expression::Path(path))}
 
-                    Ok(Expression::StructLiteral { path, fields })
-                } else {
-                    Ok(Expression::Path(path))
+                self.tokens.consume();
+
+                let mut fields = Vec::new();
+                while self.tokens.peek() != Some(&Token::CloseCurly) {
+                    let name = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    let expr = self.parse_expression()?;
+                    fields.push((name, expr));
+
+                    if self.tokens.peek() != Some(&Token::Comma) { break }
+                    self.expect(Token::Comma)?;
                 }
+                self.expect(Token::CloseCurly)?;
+
+
+                Ok(Expression::StructLiteral { path, fields })
             },
             Token::OpenParen => {
                 self.tokens.consume();
@@ -1164,6 +1174,25 @@ impl<'a> AstBuilder<'a> {
         }
     }
 
+    fn parse_return_statement(&mut self) -> Result<Statement, AstError> {
+        self.expect(Token::Return)?;
+        let expression = self.parse_expression()?;
+        if self.tokens.peek() == Some(&Token::Semicolon) { self.tokens.consume(); }
+        Ok(Statement::Return(expression))
+    }
+
+    fn parse_break_statement(&mut self) -> Result<Statement, AstError> {
+        self.expect(Token::Break)?;
+        self.expect(Token::Semicolon)?;
+        Ok(Statement::Break)
+    }
+
+    fn parse_continue_statement(&mut self) -> Result<Statement, AstError> {
+        self.expect(Token::Continue)?;
+        self.expect(Token::Semicolon)?;
+        Ok(Statement::Continue)
+    }
+
     fn parse_statement(&mut self) -> Result<Statement, AstError> {
         match self.tokens.peek() {
             Some(Token::Let) => self.parse_let_statement(),
@@ -1172,6 +1201,9 @@ impl<'a> AstBuilder<'a> {
             Some(Token::Enum) => self.parse_enum_definition(),
             Some(Token::Trait) => self.parse_trait_definition(),
             Some(Token::Impl) => self.parse_impl_definition(),
+            Some(Token::Return) => self.parse_return_statement(),
+            Some(Token::Break) => self.parse_break_statement(),
+            Some(Token::Continue) => self.parse_continue_statement(),
             _ => self.parse_expression_statement(),
         }
     }
