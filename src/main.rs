@@ -1,10 +1,13 @@
 use std::fs;
 
-use crate::{astbuilder::AstBuilder, lexer::{Lexer, LexerError, Token}};
+pub use crate::{astbuilder::AstBuilder, lexer::{Lexer, LexerError, Token}};
 
 mod peekablecursor;
-mod astbuilder;
 mod lexer;
+mod astbuilder;
+
+#[cfg(test)]
+mod tests;
 
 fn main() -> Result<(), ()> {
     let args = std::env::args().collect::<Vec<String>>();

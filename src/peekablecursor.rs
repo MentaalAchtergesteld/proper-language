@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct PeekableCursor<'a, T> {
     items: &'a [T],
     position: usize,
@@ -43,6 +44,10 @@ impl<'a, T> PeekableCursor<'a, T> {
         self.position = end_pos;
 
         &self.items[start_pos..end_pos]
+    }
+
+    pub fn from_position(&self) -> &[T] {
+        &self.items[self.position..]
     }
 }
 

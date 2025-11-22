@@ -73,6 +73,8 @@ pub enum LexerError {
     UnknownToken(String),
 }
 
+fn test<T>(test: T) {}
+
 pub struct Lexer<'a> {
     source: PeekableCursor<'a, char>,
     emitted_eof: bool,
@@ -168,7 +170,7 @@ impl<'a> Lexer<'a> {
 
             '0'..='9' => {
                 let mut number = self.source.consume_while(|c| c.is_numeric()).iter().collect::<String>();
-                if let Some('.') = self.source.peek() {
+                if self.source.peek() == Some(&'.') && self.source.peek_n(1) != Some(&'.') {
                     self.source.consume();
                     let decimals = self.source.consume_while(|c| c.is_numeric()).iter().collect::<String>();
                     number.push_str(".");

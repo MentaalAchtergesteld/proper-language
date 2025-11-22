@@ -1,8 +1,7 @@
-use std::fs::soft_link;
-
 use crate::peekablecursor::PeekableCursor;
 use crate::lexer::Token;
 
+#[derive(Clone, Debug)]
 pub enum LiteralValue {
     Integer(i32),
     Float(f32),
@@ -11,6 +10,7 @@ pub enum LiteralValue {
     Empty,
 }
 
+#[derive(Clone, Debug)]
 pub enum BinaryOperator {
     Add, Subtract, Multiply, Divide, Modulo,
     Equal, NotEqual, GreaterThan, GreaterEqual, LessThan, LessEqual,
@@ -18,11 +18,13 @@ pub enum BinaryOperator {
     BitwiseAnd, BitwiseOr, BitwiseXor, LeftShift, RightShift
 }
 
+#[derive(Clone, Debug)]
 pub enum UnaryOperator {
     Negate,
     Not
 }
 
+#[derive(Clone, Debug)]
 pub enum TypeAnnotation {
     Path(Path),
     Array(Box<TypeAnnotation>),
@@ -33,11 +35,13 @@ pub enum TypeAnnotation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct PathSegment {
     pub ident: String,
     pub generic_args: Option<Vec<TypeAnnotation>>
 }
 
+#[derive(Clone, Debug)]
 pub struct Path {
     pub segments: Vec<PathSegment>,
 }
@@ -57,48 +61,57 @@ impl Path {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Parameter {
     pub name: String,
     pub type_annotation: TypeAnnotation,
 }
 
+#[derive(Clone, Debug)]
 pub struct FunctionDefinition {
     pub signature: FunctionSignature,
-    pub block: Expression
+    pub body: Expression
 }
 
+#[derive(Clone, Debug)]
 pub struct Field {
     pub name: String,
     pub type_annotation: TypeAnnotation
 }
 
+#[derive(Clone, Debug)]
 pub struct StructDefinition {
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub fields: Vec<Field>,
 }
 
+#[derive(Clone, Debug)]
 pub enum EnumPayload {
     Tuple(Vec<TypeAnnotation>),
     Struct(Vec<Field>)
 }
 
+#[derive(Clone, Debug)]
 pub struct EnumVariant {
     name: String,
     payload: Option<EnumPayload>
 }
 
+#[derive(Clone, Debug)]
 pub struct EnumDefinition {
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub variants: Vec<EnumVariant>,
 }
 
+#[derive(Clone, Debug)]
 pub struct GenericParam {
     pub name: String,
     pub bounds: Vec<TypeAnnotation>,
 }
 
+#[derive(Clone, Debug)]
 pub struct FunctionSignature {
     pub name: String,
     pub generics: Vec<GenericParam>,
@@ -106,18 +119,21 @@ pub struct FunctionSignature {
     pub return_type: Option<TypeAnnotation>,
 }
 
+#[derive(Clone, Debug)]
 pub struct TraitDefinition {
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub functions: Vec<FunctionSignature>,
 }
 
+#[derive(Clone, Debug)]
 pub struct ImplBlock {
     pub trait_path: Option<Path>,
     pub type_path: Path,
     pub functions: Vec<Statement>,
 }
 
+#[derive(Clone, Debug)]
 pub enum Pattern {
     Literal(LiteralValue),
     Path(Path),
@@ -134,11 +150,14 @@ pub enum Pattern {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MatchArm {
     pub pattern: Pattern,
     pub body: Expression
 }
 
+
+#[derive(Clone, Debug)]
 pub enum Statement {
     Let {
         pattern: Pattern,
@@ -152,8 +171,10 @@ pub enum Statement {
     TraitDefinition(TraitDefinition),
     ImplBlock(ImplBlock),
     ExpressionStatement(Expression),
+    Return(Expression),
 }
 
+#[derive(Clone, Debug)]
 pub enum Expression {
     Literal(LiteralValue),
     Path(Path),
@@ -161,13 +182,18 @@ pub enum Expression {
     If {
         condition: Box<Expression>,
         then_branch: Box<Expression>,
-        else_branch: Box<Expression>
+        else_branch: Option<Box<Expression>>
+    },
+    IfLet {
+        pattern: Pattern,
+        value: Box<Expression>,
+        then_branch: Box<Expression>,
+        else_branch: Option<Box<Expression>>
     },
 
     Match {
-        expression: Box<Expression>,
-        then_branch: Box<Expression>,
-        else_branch: Box<Expression>
+        value: Box<Expression>,
+        arms: Vec<MatchArm>,
     },
 
     Block {
@@ -178,6 +204,11 @@ pub enum Expression {
     While {
         condition: Box<Expression>,
         body: Box<Expression>,
+    },
+    WhileLet {
+        pattern: Pattern,
+        value: Box<Expression>,
+        body: Box<Expression>
     },
 
     For {
@@ -241,8 +272,10 @@ pub enum Expression {
 
 #[derive(Debug)]
 pub enum AstError {
-    ExpectedToken(Token),
+    ExpectedToken(Token, Token),
     ExpectedPattern(Token),
+    ExpectedExpression(Token),
+    RepeatedRange,
     UnexpectedEOF,
 }
 
@@ -260,7 +293,7 @@ impl<'a> AstBuilder<'a> {
         if *token == expected {
             Ok(token)
         } else {
-            Err(AstError::ExpectedToken(token.clone()))
+            Err(AstError::ExpectedToken(expected.clone(), token.clone()))
         }
     }
 
@@ -268,7 +301,7 @@ impl<'a> AstBuilder<'a> {
         let token = self.tokens.consume().ok_or(AstError::UnexpectedEOF)?;
         match token {
             Token::IntegerLiteral(v) => Ok(*v),
-            _ => Err(AstError::ExpectedToken(Token::IntegerLiteral(0)))
+            _ => Err(AstError::ExpectedToken(Token::IntegerLiteral(0), token.clone()))
         }
     }
 
@@ -276,7 +309,7 @@ impl<'a> AstBuilder<'a> {
         let token = self.tokens.consume().ok_or(AstError::UnexpectedEOF)?;
         match token {
             Token::FloatLiteral(v) => Ok(*v),
-            _ => Err(AstError::ExpectedToken(Token::FloatLiteral(0.)))
+            _ => Err(AstError::ExpectedToken(Token::FloatLiteral(0.), token.clone()))
         }
     }
 
@@ -284,7 +317,7 @@ impl<'a> AstBuilder<'a> {
         let token = self.tokens.consume().ok_or(AstError::UnexpectedEOF)?;
         match token {
             Token::BoolLiteral(v) => Ok(*v),
-            _ => Err(AstError::ExpectedToken(Token::BoolLiteral(false)))
+            _ => Err(AstError::ExpectedToken(Token::BoolLiteral(false), token.clone()))
         }
     }
 
@@ -292,7 +325,15 @@ impl<'a> AstBuilder<'a> {
         let token = self.tokens.consume().ok_or(AstError::UnexpectedEOF)?;
         match token {
             Token::Identifier(v) => Ok(v.clone()),
-            _ => Err(AstError::ExpectedToken(Token::StringLiteral(String::new())))
+            _ => Err(AstError::ExpectedToken(Token::Identifier(String::new()), token.clone()))
+        }
+    }
+
+    fn expect_string(&mut self) -> Result<String, AstError> {
+        let token = self.tokens.consume().ok_or(AstError::UnexpectedEOF)?;
+        match token {
+            Token::StringLiteral(v) => Ok(v.clone()),
+            _ => Err(AstError::ExpectedToken(Token::StringLiteral(String::new()), token.clone()))
         }
     }
     
@@ -308,6 +349,19 @@ impl<'a> AstBuilder<'a> {
         }
         self.expect(Token::CloseCurly)?;
         Ok(fields)
+    }
+
+    fn parse_comma_list<T>(&mut self, end_token: Token, parse_item: impl Fn(&mut Self) -> Result<T, AstError>) -> Result<Vec<T>, AstError> {
+        let mut items = Vec::new();
+
+        while self.tokens.peek() != Some(&end_token) {
+            items.push(parse_item(self)?);
+            if self.tokens.peek() != Some(&Token::Comma) { break }
+            self.tokens.consume();
+        }
+        self.expect(end_token)?;
+
+        Ok(items)
     }
 
     fn parse_pattern_list(&mut self) -> Result<Vec<Pattern>, AstError> {
@@ -378,12 +432,38 @@ impl<'a> AstBuilder<'a> {
     }
 
     fn parse_type_annotation(&mut self) -> Result<TypeAnnotation, AstError> {
-        let path = self.parse_path()?;
-        let mut type_ann = TypeAnnotation::Path(path);
+        let mut type_ann = match self.tokens.peek() {
+            Some(&Token::OpenParen) => {
+                self.tokens.consume();
+                let types = self.parse_comma_list(
+                    Token::CloseParen,
+                    |this| this.parse_type_annotation()
+                )?;
+                TypeAnnotation::Tuple(types)
+            },
+            Some(&Token::Fn) => {
+                self.tokens.consume();
+                let params = self.parse_comma_list(
+                    Token::CloseParen,
+                    |this| this.parse_type_annotation()
+                )?;
+
+                let return_type = if self.tokens.peek() == Some(&Token::Arrow) {
+                    self.tokens.consume();
+                    Box::new(self.parse_type_annotation()?)
+                } else {
+                    Box::new(TypeAnnotation::Tuple(Vec::new()))
+                };
+
+                TypeAnnotation::Function { params, return_type }
+            },
+            _ => TypeAnnotation::Path(self.parse_path()?)
+        };
 
         while self.tokens.peek() == Some(&Token::OpenBracket) {
             self.tokens.consume();
             self.expect(Token::CloseBracket)?;
+
             type_ann = TypeAnnotation::Array(Box::new(type_ann));
         }
 
@@ -415,6 +495,7 @@ impl<'a> AstBuilder<'a> {
             if self.tokens.peek() != Some(&Token::Comma) { break }
             self.expect(Token::Comma)?;
         }
+        self.expect(Token::GreaterThan)?;
         Ok(params)
 
     }
@@ -436,7 +517,8 @@ impl<'a> AstBuilder<'a> {
         
         let first_ident = self.expect_identifier()?;
 
-        let first_generics = if self.tokens.peek() == Some(&Token::LessThan) {
+        let first_generics = if self.tokens.peek_n(1) == Some(&Token::LessThan) {
+            self.expect(Token::PathSeperator)?;
             Some(self.parse_generic_args()?)
         } else {
             None
@@ -457,7 +539,22 @@ impl<'a> AstBuilder<'a> {
         Ok(Path { segments })
     }
 
-    fn parse_block(&mut self) -> Result<Expression, AstError> {}
+    fn parse_block(&mut self) -> Result<Expression, AstError> {
+        let mut statements = Vec::new();
+        self.expect(Token::OpenCurly)?;
+        while self.tokens.peek() != Some(&Token::CloseCurly) {
+            let statement = self.parse_statement()?;
+            statements.push(statement);
+        }
+        self.expect(Token::CloseCurly)?;
+
+        let result = match statements.last() {
+            Some(Statement::Return(value)) => Some(Box::new(value.clone())),
+            _ => None
+        };
+
+        Ok(Expression::Block { statements, result })
+    }
 
     fn parse_field_block(&mut self) -> Result<Vec<Field>, AstError> {
         let mut fields = Vec::new();
@@ -470,7 +567,7 @@ impl<'a> AstBuilder<'a> {
 
             fields.push(Field { name, type_annotation });
             if self.tokens.peek() != Some(&Token::Comma) { break }
-            self.expect(Token::Comma);
+            self.expect(Token::Comma)?;
         }
         self.expect(Token::CloseCurly)?;
         Ok(fields)
@@ -490,7 +587,7 @@ impl<'a> AstBuilder<'a> {
             let type_annotation = self.parse_type_annotation()?;
             params.push(Parameter { name, type_annotation });
             if self.tokens.peek() != Some(&Token::Comma) { break; }
-            self.expect(Token::Comma);
+            self.expect(Token::Comma)?;
         }
         self.expect(Token::CloseParen)?;
 
@@ -505,8 +602,412 @@ impl<'a> AstBuilder<'a> {
         Ok(FunctionSignature { name, generics, params, return_type })
     }
 
+    fn parse_binary(
+        &mut self,
+        next_level: fn(&mut Self) -> Result<Expression, AstError>,
+        mut map_token_to_op: impl FnMut(&Token) -> Option<BinaryOperator>,
+    ) -> Result<Expression, AstError> {
+        let mut left = next_level(self)?;
 
-    fn parse_expression(&mut self) -> Result<Expression, AstError> {}
+        while let Some(token) = self.tokens.peek() {
+            let op = match map_token_to_op(token) {
+                Some(t) => t,
+                None => break
+            };
+            self.tokens.consume();
+
+            let right = next_level(self)?;
+            left = Expression::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right)
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_if(&mut self) -> Result<Expression, AstError> {
+        self.expect(Token::If)?;
+
+        let mut expr = if self.tokens.peek() == Some(&Token::Let) {
+            self.tokens.consume();
+            let pattern = self.parse_pattern()?;
+            self.expect(Token::Assign)?;
+            let value = Box::new(self.parse_expression()?);
+
+            let then_branch = Box::new(self.parse_expression()?);
+            Expression::IfLet { pattern, value, then_branch, else_branch: None }
+        } else {
+            let condition = Box::new(self.parse_expression()?);
+            let then_branch = Box::new(self.parse_expression()?);
+
+            Expression::If { condition, then_branch, else_branch: None }
+        };
+
+        let found_else_branch = if self.tokens.peek() == Some(&Token::Else) {
+            self.tokens.consume();
+            Some(Box::new(self.parse_expression()?))
+        } else { None };
+
+        match &mut expr {
+            Expression::If { else_branch, .. } => *else_branch = found_else_branch,
+            Expression::IfLet { else_branch, .. } => *else_branch = found_else_branch,
+            _ => unreachable!()
+        };
+
+        Ok(expr)
+    }
+
+    fn parse_match(&mut self) -> Result<Expression, AstError> {
+        self.expect(Token::Match)?;
+
+        let value = Box::new(self.parse_expression()?);
+
+        let mut arms = Vec::new();
+
+        self.expect(Token::OpenCurly)?;
+        while self.tokens.peek() != Some(&Token::CloseCurly) {
+            let pattern = self.parse_pattern()?;
+            self.expect(Token::FatArrow)?;
+            let body = self.parse_expression()?;
+
+            arms.push(MatchArm { pattern, body });
+            
+            if self.tokens.peek() != Some(&Token::Comma) { break }
+            self.tokens.consume();
+        }
+        self.expect(Token::OpenCurly)?;
+
+        Ok(Expression::Match { value, arms })
+    }
+
+    fn parse_while(&mut self) -> Result<Expression, AstError> {
+        self.expect(Token::While)?;
+
+        if self.tokens.peek() == Some(&Token::Let) {
+            self.tokens.consume();
+            let pattern = self.parse_pattern()?;
+            self.expect(Token::Assign)?;
+            let value = Box::new(self.parse_expression()?);
+            let body = Box::new(self.parse_expression()?);
+
+            Ok(Expression::WhileLet { pattern, value, body })
+        } else {
+            let condition = Box::new(self.parse_expression()?);
+            let body = Box::new(self.parse_expression()?);
+
+            Ok(Expression::While { condition, body })
+        }
+    }
+
+    fn parse_for(&mut self) -> Result<Expression, AstError> {
+        self.expect(Token::For)?;
+
+        let pattern = self.parse_pattern()?;
+        self.expect(Token::In)?;
+
+        let iterable = Box::new(self.parse_expression()?);
+
+        let body = Box::new(self.parse_expression()?);
+
+        Ok(Expression::For { pattern, iterable, body })
+    }
+
+    fn parse_primary_expression(&mut self) -> Result<Expression, AstError> {
+        let token = self.tokens.peek().ok_or(AstError::UnexpectedEOF)?;
+
+        match token {
+            Token::IntegerLiteral(_) => Ok(Expression::Literal(LiteralValue::Integer(self.expect_integer()?))),
+            Token::FloatLiteral(_) => Ok(Expression::Literal(LiteralValue::Float(self.expect_float()?))),
+            Token::BoolLiteral(_) => Ok(Expression::Literal(LiteralValue::Bool(self.expect_bool()?))),
+            Token::StringLiteral(_) => Ok(Expression::Literal(LiteralValue::String(self.expect_string()?))),
+            Token::Identifier(_) => {
+                let path = self.parse_path()?;
+
+                if self.tokens.peek() == Some(&Token::OpenCurly) {
+                    self.tokens.consume();
+
+                    let mut fields = Vec::new();
+                    while self.tokens.peek() != Some(&Token::CloseCurly) {
+                        let name = self.expect_identifier()?;
+                        self.expect(Token::Colon)?;
+                        let expr = self.parse_expression()?;
+                        fields.push((name, expr));
+
+                        if self.tokens.peek() != Some(&Token::Comma) { break }
+                        self.expect(Token::Comma)?;
+                    }
+
+                    Ok(Expression::StructLiteral { path, fields })
+                } else {
+                    Ok(Expression::Path(path))
+                }
+            },
+            Token::OpenParen => {
+                self.tokens.consume();
+
+                if self.tokens.peek() == Some(&Token::CloseParen) {
+                    self.tokens.consume();
+                    return Ok(Expression::Tuple(Vec::new()))
+                }
+
+                let first_expr = self.parse_expression()?;
+
+                if self.tokens.peek() == Some(&Token::Comma) {
+                    self.tokens.consume();
+
+                    let mut elements = vec![first_expr];
+
+                    while self.tokens.peek() != Some(&Token::CloseParen) {
+                        let expr = self.parse_expression()?;
+                        elements.push(expr);
+
+                        if self.tokens.peek() != Some(&Token::Comma) { break }
+                        self.expect(Token::Comma)?;
+                    }
+                    self.expect(Token::CloseParen)?;
+
+                    Ok(Expression::Tuple(elements))
+                } else {
+                    self.expect(Token::CloseParen)?;
+                    Ok(first_expr)
+                }
+            },
+            Token::OpenBracket => {
+                self.tokens.consume();
+
+                let mut elements = Vec::new();
+                while self.tokens.peek() != Some(&Token::CloseBracket) {
+                    let expr = self.parse_expression()?;
+                    elements.push(expr);
+
+                    if self.tokens.peek() != Some(&Token::Comma) { break }
+                    self.expect(Token::Comma)?;
+                }
+                self.expect(Token::CloseBracket)?;
+
+                Ok(Expression::Array(elements))
+            },
+
+            Token::If => self.parse_if(),
+            Token::Match => self.parse_match(),
+            Token::While => self.parse_while(),
+            Token::For => self.parse_for(),
+            Token::OpenCurly => self.parse_block(),
+            _ => Err(AstError::ExpectedExpression(token.clone()))
+        }
+    }
+
+    fn parse_postfix_expression(&mut self) -> Result<Expression, AstError> {
+        let mut expr = self.parse_primary_expression()?;
+
+        while let Some(token) = self.tokens.peek() {
+            match token {
+                Token::OpenParen => {
+                    self.tokens.consume();
+
+                    let mut args = Vec::new();
+                    while self.tokens.peek() != Some(&Token::CloseParen) {
+                        let expr = self.parse_expression()?;
+                        args.push(expr);
+                        if self.tokens.peek() != Some(&Token::Comma) { break; }
+                        self.expect(Token::Comma)?;
+                    }
+                    self.expect(Token::CloseParen)?;
+
+                    expr = Expression::Call {
+                        callee: Box::new(expr),
+                        args
+                    };
+                },
+                Token::OpenBracket => {
+                    self.tokens.consume();
+                    let index = self.parse_expression()?;
+                    self.expect(Token::CloseBracket)?;
+
+                    expr = Expression::Index {
+                        callee: Box::new(expr),
+                        index: Box::new(index)
+                    };
+                },
+                Token::Dot => {
+                    self.tokens.consume();
+                    let field = self.expect_identifier()?;
+
+                    expr = Expression::Field {
+                        callee: Box::new(expr),
+                        field,
+                    };
+                },
+                Token::QuestionMark => {
+                    self.tokens.consume();
+                    expr = Expression::Try(Box::new(expr));
+                },
+                _ => break,
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_unary_expression(&mut self) -> Result<Expression, AstError> {
+        let op = match self.tokens.peek() {
+            Some(Token::Minus) => Some(UnaryOperator::Negate),
+            Some(Token::Bang) => Some(UnaryOperator::Not),
+            _ => None
+        };
+
+        if let Some(op) = op {
+            let right = Box::new(self.parse_unary_expression()?);
+            Ok(Expression::Unary { op, right })
+        } else {
+            self.parse_postfix_expression()
+        }
+    }
+
+    fn parse_multiplicative_expression(&mut self) -> Result<Expression, AstError> {
+        self.parse_binary(Self::parse_unary_expression, |t| match t {
+            Token::Star => Some(BinaryOperator::Multiply),
+            Token::Slash => Some(BinaryOperator::Divide),
+            Token::Percent => Some(BinaryOperator::Modulo),
+            _ => None,
+        })
+    }
+
+    fn parse_additive_expression(&mut self) -> Result<Expression, AstError> {
+        self.parse_binary(Self::parse_multiplicative_expression, |t| match t {
+            Token::Plus => Some(BinaryOperator::Add),
+            Token::Minus => Some(BinaryOperator::Subtract),
+            _ => None,
+        })
+    }
+
+    fn parse_shift_expression(&mut self) -> Result<Expression, AstError> {
+        let mut left = self.parse_additive_expression()?;
+
+        while let Some(token) = self.tokens.peek() {
+            let op = match token {
+                Token::GreaterThan => {
+                    self.tokens.consume();
+
+                    if self.tokens.peek() == Some(&Token::GreaterThan) {
+                        BinaryOperator::RightShift
+                    } else {
+                        break
+                    }
+                },
+                Token::LessThan => {
+                    self.tokens.consume();
+
+                    if self.tokens.peek() == Some(&Token::LessThan) {
+                        BinaryOperator::LeftShift
+                    } else {
+                        break
+                    }
+                },
+                _ => break
+            };
+
+            let right = self.parse_additive_expression()?;
+            left = Expression::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right)
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_relational_expression(&mut self) -> Result<Expression, AstError> {
+        let mut left = self.parse_shift_expression()?;
+
+        while let Some(token) = self.tokens.peek() {
+            let op = match token {
+                Token::GreaterThan => {
+                    self.tokens.consume();
+
+                    if self.tokens.peek() == Some(&Token::Equal) {
+                        BinaryOperator::GreaterEqual
+                    } else {
+                        BinaryOperator::GreaterThan
+                    }
+                },
+                Token::LessThan => {
+                    self.tokens.consume();
+
+                    if self.tokens.peek() == Some(&Token::Equal) {
+                        BinaryOperator::LessEqual
+                    } else {
+                        BinaryOperator::LessThan
+                    }
+                },
+                _ => break
+            };
+
+            let right = self.parse_shift_expression()?;
+            left = Expression::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right)
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_equality_epxression(&mut self) -> Result<Expression, AstError> {
+        self.parse_binary(Self::parse_relational_expression, |t| match t {
+            Token::Equal => Some(BinaryOperator::Equal),
+            Token::NotEqual => Some(BinaryOperator::NotEqual),
+            _ => None,
+        })
+    }
+
+    fn parse_bitwise_and_expression(&mut self) -> Result<Expression, AstError> {
+        self.parse_binary(Self::parse_equality_epxression, |t| match t {
+            Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
+            _ => None,
+        })
+    }
+
+    fn parse_bitwise_xor_expression(&mut self) -> Result<Expression, AstError> {
+        self.parse_binary(Self::parse_bitwise_and_expression, |t| match t {
+            Token::Caret => Some(BinaryOperator::BitwiseXor),
+            _ => None,
+        })
+    }
+
+    fn parse_bitwise_or_expression(&mut self) -> Result<Expression, AstError> {
+        self.parse_binary(Self::parse_bitwise_xor_expression, |t| match t {
+            Token::Pipe => Some(BinaryOperator::BitwiseOr),
+            _ => None,
+        })
+    }
+
+    fn parse_logical_and_expression(&mut self) -> Result<Expression, AstError> {
+        self.parse_binary(Self::parse_bitwise_or_expression, |t| match t {
+            Token::And => Some(BinaryOperator::And),
+            _ => None,
+        })
+    }
+
+    fn parse_logical_or_expression(&mut self) -> Result<Expression, AstError> {
+        self.parse_binary(Self::parse_logical_and_expression, |t| match t {
+            Token::Or => Some(BinaryOperator::Or),
+            _ => None,
+        })
+    }
+
+    fn parse_expression(&mut self) -> Result<Expression, AstError> {
+        let expr = self.parse_logical_or_expression()?;
+        if self.tokens.peek() == Some(&Token::Range) {
+            let start = Box::new(expr);
+            self.tokens.consume();
+            let end = Box::new(self.parse_logical_or_expression()?);
+            Ok(Expression::Range { start, end })
+        } else {
+            Ok(expr)
+        }
+    }
 
     fn parse_let_statement(&mut self) -> Result<Statement, AstError> {
         self.expect(Token::Let)?;
@@ -514,24 +1015,27 @@ impl<'a> AstBuilder<'a> {
         let pattern = self.parse_pattern()?;
 
         let type_annotation = if self.tokens.peek() == Some(&Token::Colon) {
+            self.tokens.consume();
             Some(self.parse_type_annotation()?)
         } else {
             None
         };
 
+        self.expect(Token::Assign)?;
+
         let value = self.parse_expression()?;
-        self.expect(Token::Semicolon);
+        self.expect(Token::Semicolon)?;
 
         Ok(Statement::Let { pattern, type_annotation, value })
     }
 
     fn parse_fn_definition(&mut self) -> Result<Statement, AstError> {
         let signature = self.parse_function_signature()?;
-        let block = self.parse_block()?;
+        let body = self.parse_expression()?;
 
         Ok(Statement::FunctionDefinition(FunctionDefinition {
             signature,
-            block
+            body 
         }))
     }
 
@@ -564,13 +1068,13 @@ impl<'a> AstBuilder<'a> {
             let payload = match self.tokens.peek() {
                 Some(Token::OpenParen) => {
                     let mut annotations = Vec::new();
-                    self.expect(Token::OpenParen);
+                    self.expect(Token::OpenParen)?;
                     while self.tokens.peek() != Some(&Token::CloseParen) {
                         let type_annotation = self.parse_type_annotation()?;
                         annotations.push(type_annotation); 
 
                         if self.tokens.peek() != Some(&Token::Comma) { break }
-                        self.expect(Token::Comma);
+                        self.expect(Token::Comma)?;
                     }
                     self.expect(Token::CloseParen)?;
                     
@@ -586,7 +1090,7 @@ impl<'a> AstBuilder<'a> {
             variants.push(EnumVariant { name, payload });
 
             if self.tokens.peek() != Some(&Token::Comma) { break }
-            self.expect(Token::Comma);
+            self.expect(Token::Comma)?;
         }
         self.expect(Token::CloseCurly)?;
 
@@ -608,6 +1112,7 @@ impl<'a> AstBuilder<'a> {
         self.expect(Token::OpenCurly)?;
         while self.tokens.peek() != Some(&Token::CloseCurly) {
             let signature = self.parse_function_signature()?;
+            self.expect(Token::Semicolon)?;
             functions.push(signature);
         }
         self.expect(Token::CloseCurly)?;
@@ -638,7 +1143,7 @@ impl<'a> AstBuilder<'a> {
             let function = self.parse_fn_definition()?;
             functions.push(function);
             if self.tokens.peek() != Some(&Token::Comma) { break }
-            self.expect(Token::Comma);
+            self.expect(Token::Comma)?;
         }
         self.expect(Token::CloseCurly)?;
 
@@ -651,8 +1156,12 @@ impl<'a> AstBuilder<'a> {
 
     fn parse_expression_statement(&mut self) -> Result<Statement, AstError> {
         let expression = self.parse_expression()?;
-        self.expect(Token::Semicolon)?;
-        Ok(Statement::ExpressionStatement(expression))
+        if self.tokens.peek() == Some(&Token::Semicolon) {
+            self.tokens.consume();
+            Ok(Statement::ExpressionStatement(expression))
+        } else {
+            Ok(Statement::Return(expression))
+        }
     }
 
     fn parse_statement(&mut self) -> Result<Statement, AstError> {
@@ -676,5 +1185,9 @@ impl<'a> AstBuilder<'a> {
         }
 
         Ok(program)
+    }
+
+    pub fn build(&mut self) -> Result<Vec<Statement>, AstError> {
+        self.parse_program()
     }
 }
