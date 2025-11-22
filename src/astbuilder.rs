@@ -1,3 +1,5 @@
+use std::fs::soft_link;
+
 use crate::peekablecursor::PeekableCursor;
 use crate::lexer::Token;
 
@@ -401,7 +403,7 @@ impl<'a> AstBuilder<'a> {
                 Ok(Pattern::Wildcard)
             },
             Some(Token::Identifier(_)) => {
-                let path = self.parse_path()?;
+                let path = self.parse_expr_path()?;
 
                 match self.tokens.peek() {
                     Some(Token::OpenCurly) => {
@@ -459,7 +461,7 @@ impl<'a> AstBuilder<'a> {
 
                 TypeAnnotation::Function { params, return_type }
             },
-            _ => TypeAnnotation::Path(self.parse_path()?)
+            _ => TypeAnnotation::Path(self.parse_type_path()?)
         };
 
         while self.tokens.peek() == Some(&Token::OpenBracket) {
@@ -514,32 +516,33 @@ impl<'a> AstBuilder<'a> {
         Ok(args)
     }
 
-    fn parse_path(&mut self) -> Result<Path, AstError> {
+    fn parse_path_internal(&mut self, allow_implicit_generics: bool) -> Result<Path, AstError> {
         let mut segments = Vec::new();
-        
-        let first_ident = self.expect_identifier()?;
 
-        let first_generics = if self.tokens.peek_n(1) == Some(&Token::LessThan) {
-            self.expect(Token::PathSeperator)?;
-            Some(self.parse_generic_args()?)
-        } else {
-            None
-        };
-        segments.push(PathSegment { ident: first_ident, generic_args: first_generics });
-
-        while self.tokens.peek() == Some(&Token::PathSeperator) {
-            self.tokens.consume();
-
+        loop {
             let ident = self.expect_identifier()?;
-            let generic_args = if self.tokens.peek() == Some(&Token::LessThan) {
-                Some(self.parse_generic_args()?)
-            } else {
-                None
-            };
+            let mut generic_args = None;
+
+            if self.tokens.peek() == Some(&Token::PathSeperator)
+            && self.tokens.peek_n(1) == Some(&Token::LessThan) {
+                self.tokens.consume();
+                generic_args = Some(self.parse_generic_args()?);
+            } else if allow_implicit_generics && self.tokens.peek() == Some(&Token::LessThan) {
+                generic_args = Some(self.parse_generic_args()?);
+            }
+
             segments.push(PathSegment { ident, generic_args });
+
+            if self.tokens.peek() == Some(&Token::PathSeperator) {
+                self.tokens.consume();
+            }  else { break; }
         }
+
         Ok(Path { segments })
     }
+
+    fn parse_type_path(&mut self) -> Result<Path, AstError> { self.parse_path_internal(true) }
+    fn parse_expr_path(&mut self) -> Result<Path, AstError> { self.parse_path_internal(false) }
 
     fn parse_block(&mut self) -> Result<Expression, AstError> {
         let mut statements = Vec::new();
@@ -724,7 +727,7 @@ impl<'a> AstBuilder<'a> {
             Token::BoolLiteral(_) => Ok(Expression::Literal(LiteralValue::Bool(self.expect_bool()?))),
             Token::StringLiteral(_) => Ok(Expression::Literal(LiteralValue::String(self.expect_string()?))),
             Token::Identifier(_) => {
-                let path = self.parse_path()?;
+                let path = self.parse_expr_path()?;
 
                 if self.tokens.peek() != Some(&Token::OpenCurly) { return Ok(Expression::Path(path)) }
 
@@ -868,6 +871,7 @@ impl<'a> AstBuilder<'a> {
         };
 
         if let Some(op) = op {
+            self.tokens.consume();
             let right = Box::new(self.parse_unary_expression()?);
             Ok(Expression::Unary { op, right })
         } else {
@@ -901,6 +905,7 @@ impl<'a> AstBuilder<'a> {
                     self.tokens.consume();
 
                     if self.tokens.peek() == Some(&Token::GreaterThan) {
+                        self.tokens.consume();
                         BinaryOperator::RightShift
                     } else {
                         break
@@ -910,6 +915,7 @@ impl<'a> AstBuilder<'a> {
                     self.tokens.consume();
 
                     if self.tokens.peek() == Some(&Token::LessThan) {
+                        self.tokens.consume();
                         BinaryOperator::LeftShift
                     } else {
                         break
@@ -1137,11 +1143,11 @@ impl<'a> AstBuilder<'a> {
     fn parse_impl_definition(&mut self) -> Result<Statement, AstError> {
         self.expect(Token::Impl)?;
 
-        let first_path = self.parse_path()?;
+        let first_path = self.parse_type_path()?;
 
         let (trait_path, type_path) = if self.tokens.peek() == Some(&Token::For) {
             self.expect(Token::For)?;
-            let type_path = self.parse_path()?;
+            let type_path = self.parse_type_path()?;
             (Some(first_path), type_path)
         } else {
             (None, first_path)

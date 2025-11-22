@@ -447,3 +447,104 @@ fn test_generics_parsing() {
         _ => panic!("Expected ExpressionStatement"),
     }
 }
+
+
+#[test]
+fn test_turbofish() {
+    use crate::astbuilder::*;
+
+    let ast = parse("size_of::<int>();");
+    match &ast[0] {
+        Statement::ExpressionStatement(Expression::Call { callee, .. }) => {
+            match &**callee {
+                Expression::Path(path) => {
+                    let segment = path.segments.last().unwrap();
+                    assert_eq!(segment.ident, "size_of");
+                    assert!(segment.generic_args.is_some());
+                }
+                _ => panic!("Expected PathExpression"),
+            }
+        }
+        _ => panic!("Expected CallExpression"),
+    }
+
+    let ast = parse("let p = Point::<int> { x: 10 };");
+    match &ast[0] {
+        Statement::Let { value, .. } => {
+             match value {
+                 Expression::StructLiteral { path, .. } => {
+                     let segment = path.segments.last().unwrap();
+                     assert_eq!(segment.ident, "Point");
+                     assert!(segment.generic_args.is_some());
+                 }
+                 _ => panic!("Expected StructLiteral"),
+             }
+        }
+        _ => panic!("Expected LetStatement"),
+    }
+}
+
+#[test]
+fn test_if_let_while_let() {
+    use crate::astbuilder::*;
+
+    let ast = parse("if let Some(x) = opt { x };");
+    match &ast[0] {
+        Statement::ExpressionStatement(Expression::IfLet { pattern, value, .. }) => {
+            assert!(matches!(pattern, Pattern::Tuple { .. })); 
+            assert!(matches!(**value, Expression::Path(..)));
+        }
+        _ => panic!("Expected IfLetStatement"),
+    }
+
+    let ast = parse("while let Some(x) = iter.next() { print(x); };");
+    match &ast[0] {
+        Statement::ExpressionStatement(Expression::WhileLet { .. }) => {}
+        _ => panic!("Expected WhileLetStatement"),
+    }
+}
+
+#[test]
+fn test_for_loop() {
+    use crate::astbuilder::*;
+
+    let ast = parse("for i in 0..10 { };");
+    match &ast[0] {
+        Statement::ExpressionStatement(Expression::For { pattern, iterable, .. }) => {
+            assert!(matches!(pattern, Pattern::Identifier(..)));
+            assert!(matches!(**iterable, Expression::Range { .. }));
+        }
+        _ => panic!("Expected ForExpression"),
+    }
+}
+
+#[test]
+fn test_unary_operators() {
+    use crate::astbuilder::*;
+
+    let ast = parse("let x = -10 + !true;");
+    match &ast[0] {
+        Statement::Let { value, .. } => {
+            match value {
+                Expression::Binary { left, right, .. } => {
+                    match &**left {
+                        Expression::Unary { op, right: val, .. } => {
+                            assert!(matches!(op, UnaryOperator::Negate));
+                            assert!(matches!(**val, Expression::Literal(LiteralValue::Integer(10))));
+                        }
+                        _ => panic!("Expected UnaryExpression"),
+                    }
+                    match &**right {
+                        Expression::Unary { op, right: val, .. } => {
+                            assert!(matches!(op, UnaryOperator::Not));
+                            assert!(matches!(**val, Expression::Literal(LiteralValue::Bool(true))));
+                        }
+                        _ => panic!("Expected UnaryExpression"),
+                    }
+                }
+                _ => panic!("Expected BinaryExpression"),
+            }
+        }
+        _ => panic!("Expected LetStatement"),
+    }
+}
