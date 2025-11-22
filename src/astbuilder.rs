@@ -1,5 +1,3 @@
-use std::fs::soft_link;
-
 use crate::peekablecursor::PeekableCursor;
 use crate::lexer::Token;
 
@@ -610,16 +608,17 @@ impl<'a> AstBuilder<'a> {
     fn parse_binary(
         &mut self,
         next_level: fn(&mut Self) -> Result<Expression, AstError>,
-        mut map_token_to_op: impl FnMut(&Token) -> Option<BinaryOperator>,
+        mut map_token_to_op: impl FnMut(&PeekableCursor<Token>) -> Option<(BinaryOperator, usize)>,
     ) -> Result<Expression, AstError> {
         let mut left = next_level(self)?;
 
-        while let Some(token) = self.tokens.peek() {
-            let op = match map_token_to_op(token) {
+        while let Some(_) = self.tokens.peek() {
+            let (op, to_consume) = match map_token_to_op(&self.tokens) {
                 Some(t) => t,
                 None => break
             };
-            self.tokens.consume();
+
+            self.tokens.consume_n(to_consume);
 
             let right = next_level(self)?;
             left = Expression::Binary {
@@ -737,7 +736,7 @@ impl<'a> AstBuilder<'a> {
                     _ => false,
                 };
 
-                if !is_struct { return Ok(Expression::Path(path))}
+                if !is_struct { return Ok(Expression::Path(path)) }
 
                 self.tokens.consume();
 
@@ -880,135 +879,81 @@ impl<'a> AstBuilder<'a> {
     }
 
     fn parse_multiplicative_expression(&mut self) -> Result<Expression, AstError> {
-        self.parse_binary(Self::parse_unary_expression, |t| match t {
-            Token::Star => Some(BinaryOperator::Multiply),
-            Token::Slash => Some(BinaryOperator::Divide),
-            Token::Percent => Some(BinaryOperator::Modulo),
+        self.parse_binary(Self::parse_unary_expression, |t| match t.peek() {
+            Some(Token::Star) => Some((BinaryOperator::Multiply, 1)),
+            Some(Token::Slash) => Some((BinaryOperator::Divide, 1)),
+            Some(Token::Percent) => Some((BinaryOperator::Modulo, 1)),
             _ => None,
         })
     }
 
     fn parse_additive_expression(&mut self) -> Result<Expression, AstError> {
-        self.parse_binary(Self::parse_multiplicative_expression, |t| match t {
-            Token::Plus => Some(BinaryOperator::Add),
-            Token::Minus => Some(BinaryOperator::Subtract),
+        self.parse_binary(Self::parse_multiplicative_expression, |t| match t.peek() {
+            Some(Token::Plus) => Some((BinaryOperator::Add, 1)),
+            Some(Token::Minus) => Some((BinaryOperator::Subtract, 1)),
             _ => None,
         })
     }
 
-    fn parse_shift_expression(&mut self) -> Result<Expression, AstError> {
-        let mut left = self.parse_additive_expression()?;
-
-        while let Some(token) = self.tokens.peek() {
-            let op = match token {
-                Token::GreaterThan => {
-                    self.tokens.consume();
-
-                    if self.tokens.peek() == Some(&Token::GreaterThan) {
-                        self.tokens.consume();
-                        BinaryOperator::RightShift
-                    } else {
-                        break
-                    }
-                },
-                Token::LessThan => {
-                    self.tokens.consume();
-
-                    if self.tokens.peek() == Some(&Token::LessThan) {
-                        self.tokens.consume();
-                        BinaryOperator::LeftShift
-                    } else {
-                        break
-                    }
-                },
-                _ => break
-            };
-
-            let right = self.parse_additive_expression()?;
-            left = Expression::Binary {
-                left: Box::new(left),
-                op,
-                right: Box::new(right)
-            }
-        }
-        Ok(left)
-    }
-
-    fn parse_relational_expression(&mut self) -> Result<Expression, AstError> {
-        let mut left = self.parse_shift_expression()?;
-
-        while let Some(token) = self.tokens.peek() {
-            let op = match token {
-                Token::GreaterThan => {
-                    self.tokens.consume();
-
-                    if self.tokens.peek() == Some(&Token::Equal) {
-                        BinaryOperator::GreaterEqual
-                    } else {
-                        BinaryOperator::GreaterThan
-                    }
-                },
-                Token::LessThan => {
-                    self.tokens.consume();
-
-                    if self.tokens.peek() == Some(&Token::Equal) {
-                        BinaryOperator::LessEqual
-                    } else {
-                        BinaryOperator::LessThan
-                    }
-                },
-                _ => break
-            };
-
-            let right = self.parse_shift_expression()?;
-            left = Expression::Binary {
-                left: Box::new(left),
-                op,
-                right: Box::new(right)
-            }
-        }
-        Ok(left)
+    fn parse_shift_and_relational_expression(&mut self) -> Result<Expression, AstError> {
+        self.parse_binary(Self::parse_additive_expression, |t| match t.peek() {
+            Some(Token::GreaterThan) => {
+                match t.peek_n(1) {
+                    Some(&Token::GreaterThan) => Some((BinaryOperator::RightShift, 2)),
+                    Some(&Token::Equal) => Some((BinaryOperator::GreaterEqual, 2)),
+                    _ => Some((BinaryOperator::GreaterThan, 1))
+                }
+            },
+            Some(Token::LessThan) => {
+                match t.peek_n(1) {
+                    Some(&Token::LessThan) => Some((BinaryOperator::LeftShift, 2)), 
+                    Some(&Token::Equal) => Some((BinaryOperator::LessEqual, 2)), 
+                    _ => Some((BinaryOperator::LessThan, 1))
+                }
+            },
+            _ => None
+        })
     }
 
     fn parse_equality_epxression(&mut self) -> Result<Expression, AstError> {
-        self.parse_binary(Self::parse_relational_expression, |t| match t {
-            Token::Equal => Some(BinaryOperator::Equal),
-            Token::NotEqual => Some(BinaryOperator::NotEqual),
+        self.parse_binary(Self::parse_shift_and_relational_expression, |t| match t.peek() {
+            Some(Token::Equal) => Some((BinaryOperator::Equal, 1)),
+            Some(Token::NotEqual) => Some((BinaryOperator::NotEqual, 1)),
             _ => None,
         })
     }
 
     fn parse_bitwise_and_expression(&mut self) -> Result<Expression, AstError> {
-        self.parse_binary(Self::parse_equality_epxression, |t| match t {
-            Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
+        self.parse_binary(Self::parse_equality_epxression, |t| match t.peek() {
+            Some(Token::Ampersand) => Some((BinaryOperator::BitwiseAnd, 1)),
             _ => None,
         })
     }
 
     fn parse_bitwise_xor_expression(&mut self) -> Result<Expression, AstError> {
-        self.parse_binary(Self::parse_bitwise_and_expression, |t| match t {
-            Token::Caret => Some(BinaryOperator::BitwiseXor),
+        self.parse_binary(Self::parse_bitwise_and_expression, |t| match t.peek() {
+            Some(Token::Caret) => Some((BinaryOperator::BitwiseXor, 1)),
             _ => None,
         })
     }
 
     fn parse_bitwise_or_expression(&mut self) -> Result<Expression, AstError> {
-        self.parse_binary(Self::parse_bitwise_xor_expression, |t| match t {
-            Token::Pipe => Some(BinaryOperator::BitwiseOr),
+        self.parse_binary(Self::parse_bitwise_xor_expression, |t| match t.peek() {
+            Some(Token::Pipe) => Some((BinaryOperator::BitwiseOr, 1)),
             _ => None,
         })
     }
 
     fn parse_logical_and_expression(&mut self) -> Result<Expression, AstError> {
-        self.parse_binary(Self::parse_bitwise_or_expression, |t| match t {
-            Token::And => Some(BinaryOperator::And),
+        self.parse_binary(Self::parse_bitwise_or_expression, |t| match t.peek() {
+            Some(Token::And) => Some((BinaryOperator::And, 1)),
             _ => None,
         })
     }
 
     fn parse_logical_or_expression(&mut self) -> Result<Expression, AstError> {
-        self.parse_binary(Self::parse_logical_and_expression, |t| match t {
-            Token::Or => Some(BinaryOperator::Or),
+        self.parse_binary(Self::parse_logical_and_expression, |t| match t.peek() {
+            Some(Token::Or) => Some((BinaryOperator::Or, 1)),
             _ => None,
         })
     }
@@ -1158,8 +1103,6 @@ impl<'a> AstBuilder<'a> {
         while self.tokens.peek() != Some(&Token::CloseCurly) {
             let function = self.parse_fn_definition()?;
             functions.push(function);
-            if self.tokens.peek() != Some(&Token::Comma) { break }
-            self.expect(Token::Comma)?;
         }
         self.expect(Token::CloseCurly)?;
 

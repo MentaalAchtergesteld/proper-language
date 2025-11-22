@@ -73,8 +73,6 @@ pub enum LexerError {
     UnknownToken(String),
 }
 
-fn test<T>(test: T) {}
-
 pub struct Lexer<'a> {
     source: PeekableCursor<'a, char>,
     emitted_eof: bool,

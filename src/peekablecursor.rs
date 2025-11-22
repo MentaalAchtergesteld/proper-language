@@ -28,6 +28,12 @@ impl<'a, T> PeekableCursor<'a, T> {
 
         Some(item)
     }
+    
+    pub fn consume_n(&mut self, n: usize) {
+        if self.is_at_end() { return; }
+        self.position += n;
+        self.position = self.position.min(self.items.len());
+    }
 
     pub fn consume_while(&mut self, predicate: impl Fn(&T) -> bool) -> &[T] {
         let start_pos = self.position;

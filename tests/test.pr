@@ -1,0 +1,78 @@
+struct Point<T> {
+    x: T,
+    y: T
+}
+
+struct Vector3 {
+    x: float,
+    y: float,
+    z: float
+}
+
+enum Option<T> {
+    Some(T),
+    None
+}
+
+enum Event {
+    Click { x: int, y: int },
+    KeyPress(string),
+    Quit
+}
+
+trait Printable {
+    fn to_string() -> string;
+}
+
+impl Point<int> {
+    fn new(x: int, y: int) -> Point<int> {
+        Point { x: x, y: y }
+    }
+
+    fn origin() -> Point<int> {
+        Point::<int> { x: 0, y: 0 }
+    }
+}
+
+impl Printable for Vector3 {
+    fn to_string() -> string {
+        return "Vector3";
+    }
+}
+
+fn main() -> int {
+    let a: int = 10;
+    let b = 20;
+    let f: float = 3.14;
+    let s = "Hello, World!";
+    let is_valid = true;
+
+    let math = 1 + 2 * 3 << 1; 
+    
+    let not_true = !true;
+    let negative = -100;
+
+    let result = if a > b {
+        100
+    } else if a == b {
+        50
+    } else {
+        0
+    };
+
+    let text = match result {
+        100 => "Greater",
+        50  => "Equal",
+        _   => "Smaller"
+    };
+
+    let count = 0;
+    while count < 10 {
+        count += 1;
+        if count == 5 { continue; }
+        if count == 9 { break; }
+    }
+}
+
+fn map<T, U>(item: T) -> U {
+}

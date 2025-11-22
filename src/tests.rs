@@ -1,4 +1,4 @@
-use std::panic;
+use std::{fs, panic, path::Path};
 
 use crate::{astbuilder, lexer};
 
@@ -546,5 +546,34 @@ fn test_unary_operators() {
             }
         }
         _ => panic!("Expected LetStatement"),
+    }
+}
+
+#[test]
+fn test_parse_all_features_file() {
+    use astbuilder::*;
+    use lexer::*;
+    
+    let path = std::path::Path::new("./tests/test.pr");
+    let source = fs::read_to_string(path).expect("Can't open test file");
+
+    println!("Parsing file: {:?}", path);
+
+    let char_vec: Vec<char> = source.chars().collect();
+    let lexer = Lexer::new(&char_vec);
+    
+    let tokens: Vec<_> = lexer.collect::<Result<_, _>>()
+        .expect("Lexer failed");
+
+    let mut parser = AstBuilder::new(&tokens);
+    let ast = parser.build();
+
+    match ast {
+        Ok(statements) => {
+            println!("Succesfully parsed. Statement count: {}", statements.len());
+        },
+        Err(e) => {
+            panic!("Parser failed: {:?}", e);
+        }
     }
 }
