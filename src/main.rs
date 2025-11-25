@@ -2,6 +2,7 @@ use std::fs;
 
 pub use crate::{astbuilder::AstBuilder, lexer::{Lexer, LexerError, Token}};
 
+mod common;
 mod peekablecursor;
 mod lexer;
 mod astbuilder;
