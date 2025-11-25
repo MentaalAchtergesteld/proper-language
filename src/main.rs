@@ -1,11 +1,14 @@
 use std::fs;
 
+use crate::desugarer::Desugarer;
 pub use crate::{astbuilder::AstBuilder, lexer::{Lexer, LexerError, Token}};
 
 mod common;
 mod peekablecursor;
 mod lexer;
 mod astbuilder;
+mod hir;
+mod desugarer;
 
 #[cfg(test)]
 mod tests;
@@ -31,6 +34,9 @@ fn main() -> Result<(), ()> {
 
     println!("{ast_tree:?}");
 
+    let mut desugarer = Desugarer::new();
+    let desugared = ast_tree.iter().map(|s| desugarer.desugar_statement(s.clone())).collect::<Vec<hir::Statement>>();
+    println!("{desugared:?}");
 
     Ok(())
 }

@@ -53,12 +53,25 @@ pub struct PathSegment {
     pub generic_args: Option<Vec<TypeAnnotation>>
 }
 
+impl PathSegment {
+    pub fn ident(identifier: &str) -> Self {
+        Self { ident: identifier.to_string(), generic_args: None } 
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Path {
     pub segments: Vec<PathSegment>,
 }
 
 impl Path {
+    pub fn new() -> Self { Path { segments: Vec::new() } }
+
+    pub fn push(mut self, segment: PathSegment) -> Self {
+        self.segments.push(segment);        
+        self
+    }
+
     pub fn is_simple(&self) -> bool {
         if self.segments.len() > 1 { return false }
 
@@ -70,6 +83,18 @@ impl Path {
 
     pub fn get_first_name(&self) -> Option<String> {
         self.segments.first().map(|s| s.ident.clone())
+    }
+}
+
+impl From<Vec<PathSegment>> for Path {
+    fn from(segments: Vec<PathSegment>) -> Self {
+        Path { segments }
+    }
+}
+
+impl From<PathSegment> for Path {
+    fn from(segment: PathSegment) -> Self {
+        Path { segments: vec![segment] }
     }
 }
 
@@ -107,8 +132,8 @@ pub enum EnumPayload {
 
 #[derive(Clone, Debug)]
 pub struct EnumVariant {
-    name: String,
-    payload: Option<EnumPayload>
+    pub name: String,
+    pub payload: Option<EnumPayload>
 }
 
 #[derive(Clone, Debug)]
@@ -141,5 +166,12 @@ pub struct FunctionSignature {
     pub generics: Vec<GenericParam>,
     pub params: Vec<Parameter>,
     pub return_type: Option<TypeAnnotation>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TraitDefinition {
+    pub name: String,
+    pub generics: Vec<GenericParam>,
+    pub functions: Vec<FunctionSignature>,
 }
 

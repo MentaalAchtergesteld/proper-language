@@ -9,13 +9,6 @@ pub struct FunctionDefinition {
 }
 
 #[derive(Clone, Debug)]
-pub struct TraitDefinition {
-    pub name: String,
-    pub generics: Vec<GenericParam>,
-    pub functions: Vec<FunctionSignature>,
-}
-
-#[derive(Clone, Debug)]
 pub struct ImplBlock {
     pub trait_path: Option<Path>,
     pub type_path: Path,
@@ -32,7 +25,7 @@ pub struct MatchArm {
 #[derive(Clone, Debug)]
 pub enum Statement {
     Let {
-        pattern: Pattern,
+        name: String,
         type_annotation: Option<TypeAnnotation>,
         value: Expression
     },
@@ -43,9 +36,6 @@ pub enum Statement {
     TraitDefinition(TraitDefinition),
     ImplBlock(ImplBlock),
     ExpressionStatement(Expression),
-    Return(Expression),
-    Break,
-    Continue,
 }
 
 #[derive(Clone, Debug)]
@@ -70,10 +60,7 @@ pub enum Expression {
         arms: Vec<MatchArm>,
     },
 
-    Block {
-        statements: Vec<Statement>,
-        result: Option<Box<Expression>>
-    },
+    Block(Vec<Statement>),
 
     While {
         condition: Box<Expression>,
@@ -141,8 +128,11 @@ pub enum Expression {
         callee: Box<Expression>,
         field: String
     },
+    Try(Box<Expression>),
 
-    Try(Box<Expression>)
+    Return(Box<Expression>),
+    Break,
+    Continue,
 }
 
 #[derive(Debug)]
@@ -423,13 +413,7 @@ impl<'a> AstBuilder<'a> {
             statements.push(statement);
         }
         self.expect(Token::CloseCurly)?;
-
-        let result = match statements.last() {
-            Some(Statement::Return(value)) => Some(Box::new(value.clone())),
-            _ => None
-        };
-
-        Ok(Expression::Block { statements, result })
+        Ok(Expression::Block(statements))
     }
 
     fn parse_field_block(&mut self) -> Result<Vec<Field>, AstError> {
@@ -679,6 +663,13 @@ impl<'a> AstBuilder<'a> {
             Token::While => self.parse_while(),
             Token::For => self.parse_for(),
             Token::OpenCurly => self.parse_block(),
+            Token::Break => { self.tokens.consume(); Ok(Expression::Break) },
+            Token::Continue => { self.tokens.consume(); Ok(Expression::Break) },
+            Token::Return => {
+                self.tokens.consume();
+                let value = Box::new(self.parse_expression()?);
+                Ok(Expression::Return(value))
+            },
             _ => Err(AstError::ExpectedExpression(token.clone()))
         }
     }
@@ -916,7 +907,7 @@ impl<'a> AstBuilder<'a> {
     fn parse_let_statement(&mut self) -> Result<Statement, AstError> {
         self.expect(Token::Let)?;
 
-        let pattern = self.parse_pattern()?;
+        let name = self.expect_identifier()?;
 
         let type_annotation = if self.tokens.peek() == Some(&Token::Colon) {
             self.tokens.consume();
@@ -930,7 +921,7 @@ impl<'a> AstBuilder<'a> {
         let value = self.parse_expression()?;
         self.expect(Token::Semicolon)?;
 
-        Ok(Statement::Let { pattern, type_annotation, value })
+        Ok(Statement::Let { name, type_annotation, value })
     }
 
     fn parse_fn_definition(&mut self) -> Result<Statement, AstError> {
@@ -1062,27 +1053,13 @@ impl<'a> AstBuilder<'a> {
             self.tokens.consume();
             Ok(Statement::ExpressionStatement(expression))
         } else {
-            Ok(Statement::Return(expression))
+
+            if matches!(expression, Expression::Return(..)) {
+                Ok(Statement::ExpressionStatement(expression))
+            } else {
+                Ok(Statement::ExpressionStatement(Expression::Return(Box::new(expression))))
+            }
         }
-    }
-
-    fn parse_return_statement(&mut self) -> Result<Statement, AstError> {
-        self.expect(Token::Return)?;
-        let expression = self.parse_expression()?;
-        if self.tokens.peek() == Some(&Token::Semicolon) { self.tokens.consume(); }
-        Ok(Statement::Return(expression))
-    }
-
-    fn parse_break_statement(&mut self) -> Result<Statement, AstError> {
-        self.expect(Token::Break)?;
-        self.expect(Token::Semicolon)?;
-        Ok(Statement::Break)
-    }
-
-    fn parse_continue_statement(&mut self) -> Result<Statement, AstError> {
-        self.expect(Token::Continue)?;
-        self.expect(Token::Semicolon)?;
-        Ok(Statement::Continue)
     }
 
     fn parse_statement(&mut self) -> Result<Statement, AstError> {
@@ -1093,9 +1070,6 @@ impl<'a> AstBuilder<'a> {
             Some(Token::Enum) => self.parse_enum_definition(),
             Some(Token::Trait) => self.parse_trait_definition(),
             Some(Token::Impl) => self.parse_impl_definition(),
-            Some(Token::Return) => self.parse_return_statement(),
-            Some(Token::Break) => self.parse_break_statement(),
-            Some(Token::Continue) => self.parse_continue_statement(),
             _ => self.parse_expression_statement(),
         }
     }

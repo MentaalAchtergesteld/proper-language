@@ -1,6 +1,14 @@
-use std::{fs, panic, path::Path};
+use std::{fs, panic};
 
-use crate::{astbuilder, lexer};
+use crate::{astbuilder, common::{LiteralValue, Path, PathSegment}, desugarer::Desugarer, hir, lexer};
+
+fn lit_int(i: i32) -> astbuilder::Expression {
+    astbuilder::Expression::Literal(LiteralValue::Integer(i))
+}
+
+fn var(name: &str) -> astbuilder::Expression {
+    astbuilder::Expression::Path(Path::new().push(PathSegment::ident(name)))
+}
 
 fn tokenize(source: &str) -> Vec<lexer::Token> {
     use crate::lexer::Lexer;
@@ -13,6 +21,11 @@ fn tokenize(source: &str) -> Vec<lexer::Token> {
 fn build_ast(tokens: &[lexer::Token]) -> Vec<astbuilder::Statement> {
     use crate::astbuilder::AstBuilder;
     AstBuilder::new(tokens).build().expect("AstBuilder failed")
+}
+
+fn desugar_expression(expr: astbuilder::Expression) -> hir::Expression {
+    let mut desugarer = Desugarer::new();
+    desugarer.desugar_expression(expr)
 }
 
 fn parse(source: &str) -> Vec<astbuilder::Statement> {
@@ -159,12 +172,13 @@ fn test_all_tokens() {
 
 #[test]
 fn test_let_statement() {
+    use crate::common::*;
     use crate::astbuilder::*;
 
     let ast = parse("let test: int = 10;");
     match &ast[0] {
-        Statement::Let { pattern, type_annotation, value } => {
-            assert!(matches!(pattern, Pattern::Identifier(name) if name == "test"));
+        Statement::Let { name, type_annotation, value } => {
+            assert_eq!(name, "test");
             assert!(type_annotation.is_some());
             assert!(matches!(value, Expression::Literal(LiteralValue::Integer(10))));
         },
@@ -275,15 +289,16 @@ fn test_impl_block() {
 
 #[test]
 fn test_return() {
+    use crate::common::*;
     use crate::astbuilder::*;
 
     // Return without keyword
     let ast = parse("10 + 200");
     match &ast[0] {
-        Statement::Return(expr) => {
-            let (left, op, right) = if let Expression::Binary { left, op, right } = expr {
+        Statement::ExpressionStatement(Expression::Return(expr)) => {
+            let (left, op, right) = if let Expression::Binary { left, op, right } = &**expr {
                 (left, op, right)
-            } else { panic!("Expected BinaryExpression") };
+            } else { panic!("Expected BinaryExpression (w/o keyword)") };
 
             assert!(matches!(&**left, Expression::Literal(LiteralValue::Integer(10))));
             assert!(matches!(op, BinaryOperator::Add));
@@ -294,10 +309,10 @@ fn test_return() {
 
     let ast = parse("return 500 * 30");
     match &ast[0] {
-        Statement::Return(expr) => {
-            let (left, op, right) = if let Expression::Binary { left, op, right } = expr {
+        Statement::ExpressionStatement(Expression::Return(expr)) => {
+            let (left, op, right) = if let Expression::Binary { left, op, right } = &**expr {
                 (left, op, right)
-            } else { panic!("Expected BinaryExpression") };
+            } else { panic!("Expected BinaryExpression (w/ keyword)") };
 
             assert!(matches!(&**left, Expression::Literal(LiteralValue::Integer(500))));
             assert!(matches!(op, BinaryOperator::Multiply));
@@ -309,6 +324,7 @@ fn test_return() {
 
 #[test]
 fn test_operator_precedence() {
+    use crate::common::*;
     use crate::astbuilder::*;
 
     let ast = parse("1 + 2 * 3;");
@@ -375,6 +391,7 @@ fn test_postfix_chains() {
 
 #[test]
 fn test_control_flow() {
+    use crate::common::*;
     use crate::astbuilder::*;
 
     let ast = parse("if x { 1 } else { 2 };");
@@ -394,7 +411,7 @@ fn test_control_flow() {
             assert!(matches!(**condition, Expression::Literal(LiteralValue::Bool(true))));
 
             match &**body {
-                Expression::Block { statements, .. } => assert!(matches!(statements[0], Statement::Break)),
+                Expression::Block(statements) => assert!(matches!(statements[0], Statement::ExpressionStatement(Expression::Break))),
                 _ => panic!("Expected BlockExpression")
             };
         },
@@ -404,6 +421,7 @@ fn test_control_flow() {
 
 #[test]
 fn test_match_expression() {
+    use crate::common::*;
     use crate::astbuilder::*;
 
     let ast = parse("match x { 1 => true, _ => false };");
@@ -426,6 +444,7 @@ fn test_match_expression() {
 
 #[test]
 fn test_generics_parsing() {
+    use crate::common::*;
     use crate::astbuilder::*;
 
     let ast = parse("let a: Vec<Vec<int>> = [];");
@@ -486,6 +505,7 @@ fn test_turbofish() {
 
 #[test]
 fn test_if_let_while_let() {
+    use crate::common::*;
     use crate::astbuilder::*;
 
     let ast = parse("if let Some(x) = opt { x };");
@@ -506,6 +526,7 @@ fn test_if_let_while_let() {
 
 #[test]
 fn test_for_loop() {
+    use crate::common::*;
     use crate::astbuilder::*;
 
     let ast = parse("for i in 0..10 { };");
@@ -520,6 +541,7 @@ fn test_for_loop() {
 
 #[test]
 fn test_unary_operators() {
+    use crate::common::*;
     use crate::astbuilder::*;
 
     let ast = parse("let x = -10 + !true;");
@@ -575,5 +597,129 @@ fn test_parse_all_features_file() {
         Err(e) => {
             panic!("Parser failed: {:?}", e);
         }
+    }
+}
+
+#[test]
+fn test_range_desugaring() {
+    use crate::{astbuilder, hir};
+    let ast_expr = astbuilder::Expression::Range {
+        start: Box::new(lit_int(1)),
+        end: Box::new(lit_int(10)),
+    };
+
+    let hir_expr = desugar_expression(ast_expr);
+
+    match hir_expr {
+        hir::Expression::StructLiteral { path, fields } => {
+            assert_eq!(path.segments[0].ident, "Range");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].0, "start");
+            assert_eq!(fields[1].0, "end");
+        },
+        _ => panic!("Range should desugar to StructLiteral")
+    }
+}
+
+#[test]
+fn test_compound_assignment_desugaring() {
+    use crate::{astbuilder, hir, common::*};
+    let ast_expr = astbuilder::Expression::Assign {
+        left: Box::new(var("a")),
+        op: AssignmentOperator::AddAssign,
+        right: Box::new(lit_int(5)),
+    };
+
+    let hir_expr = desugar_expression(ast_expr);
+
+    match hir_expr{
+        hir::Expression::Assign { target, value } => {
+            match *value {
+                hir::Expression::Binary { left, op, right } => {
+                    assert!(matches!(op, BinaryOperator::Add));
+                }
+                _ => panic!("RHS of assignment must be Binary"),
+            }
+        }
+        _ => panic!("+= must desugar to Assign (=)"),
+    }
+}
+#[test]
+fn test_try_operator_desugaring() {
+    use crate::{astbuilder, hir};
+    let ast_expr = astbuilder::Expression::Try(Box::new(var("a")));
+
+    let hir_expr = desugar_expression(ast_expr);
+
+    match hir_expr {
+        hir::Expression::Match { value, arms } => {
+            assert_eq!(arms.len(), 2);
+            
+            let err_arm = &arms[1];
+            match &err_arm.body {
+                hir::Expression::Return(_) => {}, // Good!
+                _ => panic!("Err arm of '?' must be a Return"),
+            }
+        }
+        _ => panic!("'?' must desugar to Match"),
+    }
+}
+
+#[test]
+fn test_while_let_desugaring() {
+    use crate::common;
+
+    let ast_expr = astbuilder::Expression::WhileLet {
+        pattern: common::Pattern::Wildcard, // No span in pattern
+        value: Box::new(var("iter")),
+        body: Box::new(lit_int(1)),
+    };
+
+    let hir_expr = desugar_expression(ast_expr);
+
+    match hir_expr{
+        hir::Expression::Loop(body) => {
+            match *body {
+                hir::Expression::Match { .. } => {}, 
+                _ => panic!("Body of Loop must be a Match"),
+            }
+        }
+        _ => panic!("While Let must desugar to Loop"),
+    }
+}
+
+#[test]
+fn test_for_loop_desugaring() {
+    use crate::common;
+
+    let ast_expr = astbuilder::Expression::For {
+        pattern: common::Pattern::Identifier("i".to_string()),
+        iterable: Box::new(var("list")),
+        body: Box::new(lit_int(1)),
+    };
+
+    let hir_expr = desugar_expression(ast_expr);
+
+    match hir_expr {
+        hir::Expression::Block(statements) => {
+            assert!(!statements.is_empty());
+            
+            match &statements[0] {
+                hir::Statement::Let { name, value, .. } => {
+                    assert!(name.starts_with("$iter_"));
+                }
+                _ => panic!("First statement of for-loop must be Let"),
+            }
+
+            if let hir::Statement::Expression(res_expr) = &statements[1] {
+                match res_expr {
+                    hir::Expression::Loop { .. } => {}, 
+                    _ => panic!("Result of block must be Loop"),
+                }
+            } else {
+                panic!("Block must have a result");
+            }
+        }
+        _ => panic!("For loop must desugar to Block"),
     }
 }
