@@ -19,6 +19,21 @@ pub enum BinaryOperator {
 }
 
 #[derive(Clone, Debug)]
+pub enum AssignmentOperator {
+    Assign,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    ModAssign,
+    AndAssign,
+    OrAssign,
+    XorAssign,
+    LeftShiftAssign,
+    RightShiftAssign,
+}
+
+#[derive(Clone, Debug)]
 pub enum UnaryOperator {
     Negate,
     Not
@@ -235,6 +250,7 @@ pub enum Expression {
 
     Assign {
         left: Box<Expression>,
+        op: AssignmentOperator,
         right: Box<Expression>
     },
 
@@ -880,17 +896,32 @@ impl<'a> AstBuilder<'a> {
 
     fn parse_multiplicative_expression(&mut self) -> Result<Expression, AstError> {
         self.parse_binary(Self::parse_unary_expression, |t| match t.peek() {
-            Some(Token::Star) => Some((BinaryOperator::Multiply, 1)),
-            Some(Token::Slash) => Some((BinaryOperator::Divide, 1)),
-            Some(Token::Percent) => Some((BinaryOperator::Modulo, 1)),
+            Some(Token::Star) => {
+                if t.peek_n(1) == Some(&Token::Assign) { return None };
+                Some((BinaryOperator::Multiply, 1))
+            },
+            Some(Token::Slash) => {
+                if t.peek_n(1) == Some(&Token::Assign) { return None };
+                Some((BinaryOperator::Divide, 1))
+            },
+            Some(Token::Percent) => {
+                if t.peek_n(1) == Some(&Token::Assign) { return None };
+                Some((BinaryOperator::Modulo, 1))
+            },
             _ => None,
         })
     }
 
     fn parse_additive_expression(&mut self) -> Result<Expression, AstError> {
         self.parse_binary(Self::parse_multiplicative_expression, |t| match t.peek() {
-            Some(Token::Plus) => Some((BinaryOperator::Add, 1)),
-            Some(Token::Minus) => Some((BinaryOperator::Subtract, 1)),
+            Some(Token::Plus) => {
+                if t.peek_n(1) == Some(&Token::Assign) { return None };
+                Some((BinaryOperator::Add, 1))
+            },
+            Some(Token::Minus) => {
+                if t.peek_n(1) == Some(&Token::Assign) { return None };
+                Some((BinaryOperator::Subtract, 1))
+            },
             _ => None,
         })
     }
@@ -899,14 +930,20 @@ impl<'a> AstBuilder<'a> {
         self.parse_binary(Self::parse_additive_expression, |t| match t.peek() {
             Some(Token::GreaterThan) => {
                 match t.peek_n(1) {
-                    Some(&Token::GreaterThan) => Some((BinaryOperator::RightShift, 2)),
+                    Some(&Token::GreaterThan) => {
+                        if t.peek_n(1) == Some(&Token::Assign) { return None };
+                        Some((BinaryOperator::RightShift, 2))
+                    }
                     Some(&Token::Equal) => Some((BinaryOperator::GreaterEqual, 2)),
                     _ => Some((BinaryOperator::GreaterThan, 1))
                 }
             },
             Some(Token::LessThan) => {
                 match t.peek_n(1) {
-                    Some(&Token::LessThan) => Some((BinaryOperator::LeftShift, 2)), 
+                    Some(&Token::LessThan) => {
+                        if t.peek_n(1) == Some(&Token::Assign) { return None };
+                        Some((BinaryOperator::LeftShift, 2))
+                    }, 
                     Some(&Token::Equal) => Some((BinaryOperator::LessEqual, 2)), 
                     _ => Some((BinaryOperator::LessThan, 1))
                 }
@@ -925,21 +962,30 @@ impl<'a> AstBuilder<'a> {
 
     fn parse_bitwise_and_expression(&mut self) -> Result<Expression, AstError> {
         self.parse_binary(Self::parse_equality_epxression, |t| match t.peek() {
-            Some(Token::Ampersand) => Some((BinaryOperator::BitwiseAnd, 1)),
+            Some(Token::Ampersand) => {
+                if t.peek_n(1) == Some(&Token::Assign) { return None };
+                Some((BinaryOperator::BitwiseAnd, 1))
+            },
             _ => None,
         })
     }
 
     fn parse_bitwise_xor_expression(&mut self) -> Result<Expression, AstError> {
         self.parse_binary(Self::parse_bitwise_and_expression, |t| match t.peek() {
-            Some(Token::Caret) => Some((BinaryOperator::BitwiseXor, 1)),
+            Some(Token::Caret) => {
+                if t.peek_n(1) == Some(&Token::Assign) { return None };
+                Some((BinaryOperator::BitwiseXor, 1))
+            },
             _ => None,
         })
     }
 
     fn parse_bitwise_or_expression(&mut self) -> Result<Expression, AstError> {
         self.parse_binary(Self::parse_bitwise_xor_expression, |t| match t.peek() {
-            Some(Token::Pipe) => Some((BinaryOperator::BitwiseOr, 1)),
+            Some(Token::Pipe) => {
+                if t.peek_n(1) == Some(&Token::Assign) { return None };
+                Some((BinaryOperator::BitwiseOr, 1))
+            },
             _ => None,
         })
     }
@@ -958,16 +1004,56 @@ impl<'a> AstBuilder<'a> {
         })
     }
 
-    fn parse_expression(&mut self) -> Result<Expression, AstError> {
-        let expr = self.parse_logical_or_expression()?;
+    fn parse_range(&mut self) -> Result<Expression, AstError> {
+        let start = self.parse_logical_or_expression()?;
         if self.tokens.peek() == Some(&Token::Range) {
-            let start = Box::new(expr);
+            let start = Box::new(start);
             self.tokens.consume();
             let end = Box::new(self.parse_logical_or_expression()?);
             Ok(Expression::Range { start, end })
         } else {
-            Ok(expr)
+            Ok(start)
         }
+    }
+
+    fn parse_assignment(&mut self) -> Result<Expression, AstError> {
+        let left = self.parse_range()?;
+
+        let token = self.tokens.peek();
+        let op = match token {
+            Some(Token::Assign) => { self.tokens.consume(); AssignmentOperator::Assign },
+            Some(_) if self.tokens.peek_n(1) == Some(&Token::Assign) => {
+                let op = match self.tokens.peek() {
+                    Some(Token::Plus)      => { self.tokens.consume(); AssignmentOperator::AddAssign },
+                    Some(Token::Minus)     => { self.tokens.consume(); AssignmentOperator::SubAssign },
+                    Some(Token::Star)      => { self.tokens.consume(); AssignmentOperator::MulAssign },
+                    Some(Token::Slash)     => { self.tokens.consume(); AssignmentOperator::DivAssign },
+                    Some(Token::Percent)   => { self.tokens.consume(); AssignmentOperator::ModAssign },
+                    Some(Token::Ampersand) => { self.tokens.consume(); AssignmentOperator::AndAssign},
+                    Some(Token::Pipe)      => { self.tokens.consume(); AssignmentOperator::OrAssign },
+                    Some(Token::Caret)     => { self.tokens.consume(); AssignmentOperator::XorAssign },
+                    Some(Token::LessThan) if self.tokens.peek_n(1) == Some(&Token::LessThan) => {
+                        self.tokens.consume_n(2);
+                        AssignmentOperator::LeftShiftAssign
+                    },
+                    Some(Token::GreaterThan) if self.tokens.peek_n(1) == Some(&Token::GreaterThan) => {
+                        self.tokens.consume_n(2);
+                        AssignmentOperator::RightShiftAssign
+                    },
+                    _ => return Ok(left),
+                };
+                self.tokens.consume();
+                op
+            },
+            _ => return Ok(left),
+        };
+
+        let right = Box::new(self.parse_assignment()?);
+        Ok(Expression::Assign { left: Box::new(left), op, right })
+    }
+
+    fn parse_expression(&mut self) -> Result<Expression, AstError> {
+        self.parse_assignment()
     }
 
     fn parse_let_statement(&mut self) -> Result<Statement, AstError> {
