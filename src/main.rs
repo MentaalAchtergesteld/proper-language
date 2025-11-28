@@ -9,6 +9,7 @@ mod lexer;
 mod astbuilder;
 mod hir;
 mod desugarer;
+mod typechecker;
 
 #[cfg(test)]
 mod tests;

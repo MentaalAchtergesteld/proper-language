@@ -1,4 +1,4 @@
-use crate::{astbuilder, common::{AssignmentOperator, BinaryOperator, Path, PathSegment, Pattern, TypeAnnotation}, hir};
+use crate::{astbuilder, common::{AssignmentOperator, BinaryOperator, Path, PathSegment, Pattern}, hir};
 
 pub struct Desugarer {
     temp_counter: usize,
@@ -10,6 +10,7 @@ impl Desugarer {
     pub fn push_temp(&mut self) -> usize {
         let count = self.temp_counter;
         self.temp_counter += 1;
+
         count
     }
 
