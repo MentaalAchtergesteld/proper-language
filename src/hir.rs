@@ -89,10 +89,3 @@ pub enum Expression {
     Break,
     Continue
 }
-
-pub enum Type {}
-
-pub struct TypedExpression {
-    expr: Expression,
-    ty: Type
-}
