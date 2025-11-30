@@ -1,7 +1,7 @@
 #[derive(Debug)]
 pub struct PeekableCursor<'a, T> {
     items: &'a [T],
-    position: usize,
+    pub position: usize,
 }
 
 impl<'a, T> PeekableCursor<'a, T> {

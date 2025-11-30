@@ -1,8 +1,9 @@
 use std::fs;
 
-use crate::desugarer::Desugarer;
+use crate::{desugarer::Desugarer, reporting::Spanned};
 pub use crate::{astbuilder::AstBuilder, lexer::{Lexer, LexerError, Token}};
 
+mod reporting;
 mod common;
 mod peekablecursor;
 mod lexer;
@@ -25,8 +26,9 @@ fn main() -> Result<(), ()> {
 
     let chars = source_code.chars().collect::<Vec<char>>();
 
-    let tokens = Lexer::new(&chars).collect::<Result<Vec<Token>, LexerError>>()
-        .map_err(|e| eprintln!("ERROR: couldn't tokenize source: {e:?}"))?;
+    let tokens = Lexer::new(&chars).collect::<Result<Vec<Spanned<Token>>, Spanned<LexerError>>>()
+        .map_err(|e| eprintln!("ERROR: couldn't tokenize source: {:?} at {:?}", e.value, &chars[e.span.start..e.span.end]))?;
+
 
     println!("{tokens:?}");
 

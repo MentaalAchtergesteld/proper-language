@@ -9,7 +9,11 @@ enum Type {
     String,
     Unit,
     Never,
-    Function(FunctionSignature),
+
+    Function {
+        params: Vec<Type>,
+        return_type: Box<Type>
+    },
     Struct(StructDefinition),
     Enum(EnumDefinition),
     Array(Box<Type>),

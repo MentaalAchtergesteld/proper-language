@@ -1,3 +1,5 @@
+use crate::Token;
+
 #[derive(Clone, Debug)]
 pub enum LiteralValue {
     Integer(i32),
@@ -34,6 +36,16 @@ pub enum AssignmentOperator {
 pub enum UnaryOperator {
     Negate,
     Not
+}
+
+impl UnaryOperator {
+    pub fn from_token(token: &Token) -> Option<Self> {
+        match token {
+            Token::Minus => Some(Self::Negate),
+            Token::Bang => Some(Self::Not),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
