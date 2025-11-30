@@ -206,6 +206,19 @@ impl<'a> AstBuilder<'a> {
         } else { false }
     }
 
+    fn check_n(&self, expected: &Token, n: usize) -> bool {
+        if let Some(t) = self.tokens.peek_n(n) {
+            discriminant(&t.value) == discriminant(expected)
+        } else { false }
+    }
+
+    fn check_and_consume(&mut self, expected: &Token) -> bool {
+        if self.check_next(expected) {
+            self.tokens.consume();
+            true
+        } else { false }
+    }
+
     fn expect(&mut self, expected: &Token) -> Result<&Spanned<Token>, Spanned<AstError>> {
         let token = self.consume_token_or_err()?;
 
@@ -345,9 +358,119 @@ impl<'a> AstBuilder<'a> {
             open.combine(&close)
         ))
     }
+
+    fn parse_function_type(&mut self) -> Result<Spanned<TypeAnnotation>, Spanned<AstError>> {
+        let start = self.tokens.consume().unwrap().span;
+
+        self.expect(&Token::OpenParen)?;
+
+        let params = self.parse_seperated_list(
+            Token::CloseParen,
+            Token::Comma,
+            |p| p.parse_type_annotation()
+        )?;
+
+        let return_type = if self.check_and_consume(&Token::Arrow) {
+            Some(Box::new(self.parse_type_annotation()?))
+        } else { None };
+
+        let end_span = match &return_type {
+            Some(rt) => rt.span,
+            None => params.last().map(|p| p.span).unwrap_or(start)
+        };
+
+        Ok(Spanned::new(
+            TypeAnnotation::Function { params, return_type },
+            start.combine(&end_span)
+        ))
+    }
+
+    fn parse_type_annotation(&mut self) -> Result<Spanned<TypeAnnotation>, Spanned<AstError>> {
+        let token = self.peek_token_or_err()?;
+
+        match token.value {
+            Token::OpenBracket => {
+                let start = self.tokens.consume().unwrap().span;
+
+                let inner_type = self.parse_type_annotation()?;
+
+                let end = self.expect(&Token::CloseBracket)?;
+
+                let span = start.combine(&end.span);
+                Ok(Spanned::new(
+                    TypeAnnotation::Array(Box::new(inner_type)),
+                    span
+                ))
+            },
+            Token::OpenParen => {
+                let start = self.tokens.consume().unwrap().span;
+                
+                let types = self.parse_seperated_list(
+                    Token::CloseParen,
+                    Token::Comma,
+                    |p| p.parse_type_annotation()
+                )?;
+
+                let end_span = types.last().map(|t| t.span).unwrap_or(start);
+
+                Ok(Spanned::new(
+                    TypeAnnotation::Tuple(types),
+                    start.combine(&end_span),
+                ))
+            },
+            Token::Fn => self.parse_function_type(),
+            _ => {
+                let path = self.parse_type_path()?;
+                let span = path.span;
+                Ok(Spanned::new(TypeAnnotation::Path(path), span))
+            }
+        }
+    }
+
+    fn parse_generic_args(&mut self) -> Result<Spanned<Vec<SpannedType>>, Spanned<AstError>> {
+        let start = self.expect(&Token::LessThan)?.span;
+
+        let args = self.parse_seperated_list(
+            Token::GreaterThan,
+            Token::Comma,
+            |p| p.parse_type_annotation()
+        )?;
+
+        let end = self.expect(&Token::GreaterThan)?.span;
+
+        let span = start.combine(&end);
+        Ok(Spanned::new(args, span))
+    }
+
+    fn parse_path(&mut self, allow_implicit_generics: bool) -> Result<Spanned<Path>, Spanned<AstError>> {
+        let span = Span::from(self.tokens.position..self.tokens.position);
+        let mut path = Path::new();
+        loop {
+            let ident = self.expect_identifier()?;
+
+            let generics = if self.check_n(&Token::PathSeperator, 1) && self.check_n(&Token::LessThan, 2) {
+                self.tokens.consume();
+                Some(self.parse_generic_args()?)
+            } else if allow_implicit_generics && self.check_next(&Token::LessThan) {
+                Some(self.parse_generic_args()?)
+            } else { None };
+
+            
+            span.extend(self.tokens.position);
+            path.push(PathSegment::new(ident, generics));
+
+            if !self.check_and_consume(&Token::PathSeperator) { break }
+        }
+
+        Ok(Spanned::new(path, span))
+    }
     
+    fn parse_type_path(&mut self) -> Result<Spanned<Path>, Spanned<AstError>> {
+        self.parse_path(true)
+    }
+
     fn parse_expr_path(&mut self) -> Result<Spanned<Path>, Spanned<AstError>> {
-        todo!()
+        self.parse_path(false)
     }
 
     fn parse_struct_literal(&mut self, path: Spanned<Path>) -> ExprResult {
@@ -382,7 +505,82 @@ impl<'a> AstBuilder<'a> {
         }
     }
 
-    fn parse_if_expression(&mut self) -> ExprResult { todo!() }
+    fn parse_pattern(&mut self) -> Result<Spanned<Pattern>, Spanned<AstError>> {
+       let token = self.peek_token_or_err()?;
+
+        match token.value {
+            Token::Underscore => {
+                let t = self.tokens.consume().unwrap();
+                Ok(Spanned::new(Pattern::Wildcard, t.span))
+            },
+            Token::IntegerLiteral(v) => {
+                let t = self.tokens.consume().unwrap();
+                Ok(Spanned::new(Expression::Literal(LiteralValue::Integer(v)), t.span))
+            },
+            Token::FloatLiteral(v) => {
+                let t = self.tokens.consume().unwrap();
+                Ok(Spanned::new(Pattern::Literal(LiteralValue::Float(v)), t.span))
+            },
+            Token::BoolLiteral(v) => {
+                let t = self.tokens.consume().unwrap();
+                Ok(Spanned::new(Pattern::Literal(LiteralValue::Bool(v)), t.span))
+            },
+            Token::StringLiteral(v) => {
+                let t = self.tokens.consume().unwrap();
+                Ok(Spanned::new(Pattern::Literal(LiteralValue::String(v)), t.span))
+            },
+            Token::OpenParen => {
+                let start = self.tokens.consume().unwrap().span;
+
+                let patterns = self.parse_seperated_list(
+                    Token::CloseParen,
+                    Token::Comma,
+                    |p| p.parse_pattern()
+                )?;
+                let span = start.extend(self.tokens.position);
+
+                Ok(Spanned::new(
+                    Pattern::Tuple { path: None, patterns },
+                    span
+                ))
+
+            }
+        }
+    }
+
+    fn parse_if_let_expression(&mut self) -> ExprResult {
+        let open = self.expect(&Token::If)?.span;
+        self.expect(&Token::Let)?;
+
+        let pattern = self.parse_pattern()?;
+        self.expect(&Token::Assign)?;
+
+        let value = Box::new(self.parse_expression(0)?);
+        let then_branch = Box::new(self.parse_block_expression()?);
+
+        let else_branch = if self.check_next(&Token::Else) {
+            Some(Box::new(self.parse_expression(0)?))
+        } else { None };
+
+        Ok(Spanned::new(
+            Expression::IfLet { pattern, value, then_branch, else_branch },
+            open.extend(self.tokens.position)
+        ))
+    }
+
+    fn parse_if_expression(&mut self) -> ExprResult {
+        if self.check_n(&Token::Let, 2) { return self.parse_if_let_expression() }
+        let open = self.expect(&Token::If)?.span;
+
+        let condition = Box::new(self.parse_expression(0)?);
+        let then_branch = Box::new(self.parse_expression(0)?);
+
+        let else_branch = if self.check_next(&Token::Else) {
+            Some(Box::new(self.parse_expression(0)?))
+        } else { None };
+
+        Ok(Spanned::new(Expression::If { condition, then_branch, else_branch }, open.extend(self.tokens.position)))
+    }
     fn parse_match_expression(&mut self) -> ExprResult { todo!() }
     fn parse_while_expression(&mut self) -> ExprResult { todo!() }
     fn parse_for_expression(&mut self) -> ExprResult { todo!() }

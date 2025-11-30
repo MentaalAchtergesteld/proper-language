@@ -1,4 +1,4 @@
-use crate::Token;
+use crate::{reporting::Spanned, Token};
 
 #[derive(Clone, Debug)]
 pub enum LiteralValue {
@@ -20,16 +20,16 @@ pub enum BinaryOperator {
 #[derive(Clone, Debug)]
 pub enum AssignmentOperator {
     Assign,
-    AddAssign,
-    SubAssign,
-    MulAssign,
-    DivAssign,
-    ModAssign,
-    AndAssign,
-    OrAssign,
-    XorAssign,
-    LeftShiftAssign,
-    RightShiftAssign,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    And,
+    Or,
+    Xor,
+    LeftShift,
+    RightShift,
 }
 
 #[derive(Clone, Debug)]
@@ -48,65 +48,58 @@ impl UnaryOperator {
     }
 }
 
+pub type SpannedType = Spanned<TypeAnnotation>;
 #[derive(Clone, Debug)]
 pub enum TypeAnnotation {
-    Path(Path),
-    Array(Box<TypeAnnotation>),
-    Tuple(Vec<TypeAnnotation>),
+    Path(Spanned<Path>),
+    Array(Box<SpannedType>),
+    Tuple(Vec<SpannedType>),
     Function {
-        params: Vec<TypeAnnotation>,
-        return_type: Box<TypeAnnotation>
+        params: Vec<SpannedType>,
+        return_type: Option<Box<SpannedType>>
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct PathSegment {
-    pub ident: String,
-    pub generic_args: Option<Vec<TypeAnnotation>>
+    pub ident: Spanned<String>,
+    pub generics: Option<Spanned<Vec<SpannedType>>>
 }
 
 impl PathSegment {
-    pub fn ident(identifier: &str) -> Self {
-        Self { ident: identifier.to_string(), generic_args: None } 
+    pub fn new(ident: Spanned<String>, generics: Option<Spanned<Vec<SpannedType>>>) -> Self {
+        Self {
+            ident: ident.into(),
+            generics 
+        }
+    }
+
+    pub fn ident(ident: Spanned<String>) -> Self {
+        Self {
+            ident: ident.into(),
+            generics: None
+        }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct Path {
-    pub segments: Vec<PathSegment>,
+    pub segments: Vec<PathSegment>
 }
 
 impl Path {
     pub fn new() -> Self { Path { segments: Vec::new() } }
 
-    pub fn push(mut self, segment: PathSegment) -> Self {
-        self.segments.push(segment);        
-        self
+    pub fn push(&mut self, segment: PathSegment) {
+        self.segments.push(segment);
+    }
+
+    pub fn get_first_name(&self) -> Option<&str> {
+        self.segments.first().map(|s| s.ident.as_str())
     }
 
     pub fn is_simple(&self) -> bool {
-        if self.segments.len() > 1 { return false }
-
-        match self.segments.first() {
-            Some(segment) => segment.generic_args.is_none(),
-            None => true
-        }
-    }
-
-    pub fn get_first_name(&self) -> Option<String> {
-        self.segments.first().map(|s| s.ident.clone())
-    }
-}
-
-impl From<Vec<PathSegment>> for Path {
-    fn from(segments: Vec<PathSegment>) -> Self {
-        Path { segments }
-    }
-}
-
-impl From<PathSegment> for Path {
-    fn from(segment: PathSegment) -> Self {
-        Path { segments: vec![segment] }
+        self.segments.len() == 1 && self.segments[0].generics.is_none()
     }
 }
 
