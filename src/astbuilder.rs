@@ -25,6 +25,8 @@ pub struct MatchArm {
 }
 
 
+type StmtNode = Spanned<Statement>;
+type StmtResult = Result<StmtNode, Spanned<AstError>>;
 #[derive(Clone, Debug)]
 pub enum Statement {
     Let {
@@ -55,7 +57,7 @@ pub enum Expression {
         else_branch: Option<Box<ExprNode>>
     },
     IfLet {
-        pattern: Pattern,
+        pattern: Spanned<Pattern>,
         value: Box<ExprNode>,
         then_branch: Box<ExprNode>,
         else_branch: Option<Box<ExprNode>>
@@ -292,7 +294,7 @@ impl<'a> AstBuilder<'a> {
         terminator: Token,
         seperator: Token,
         parse_item: impl Fn(&mut Self) -> Result<T, Spanned<AstError>>
-    ) -> Result<Vec<T>, Spanned<AstError>> {
+    ) -> Result<(Vec<T>, Span), Spanned<AstError>> {
         let mut items = Vec::new();
 
         while self.peek_inner() != Some(&terminator) {
@@ -303,8 +305,8 @@ impl<'a> AstBuilder<'a> {
             
             if self.peek_inner() == Some(&terminator) { break }
         }
-        self.expect(&terminator)?;
-        Ok(items)
+        let span = self.expect(&terminator)?.span;
+        Ok((items, span))
     } 
 
     fn parse_grouping_or_tuple(&mut self) -> ExprResult {
@@ -337,11 +339,11 @@ impl<'a> AstBuilder<'a> {
     }
 
     fn parse_array_literal(&mut self) -> ExprResult {
-        let open = self.expect(&Token::OpenBracket)?.span;
-        let array = self.parse_seperated_list(Token::CloseBracket, Token::Comma, |p| p.parse_expression(0))?;
+        let start = self.expect(&Token::OpenBracket)?.span;
+        let (array, end) = self.parse_seperated_list(Token::CloseBracket, Token::Comma, |p| p.parse_expression(0))?;
         Ok(Spanned::new(
             Expression::Array(array),
-            open.extend(self.tokens.position)
+            start.combine(&end)
         ))
     }
 
@@ -349,7 +351,7 @@ impl<'a> AstBuilder<'a> {
         let open = self.expect(&Token::OpenCurly)?.span;
         let mut stmts = Vec::new();
         while !self.check_next(&Token::CloseCurly) {
-            todo!()
+            stmts.push(self.parse_statement());
         }
         let close = self.expect(&Token::CloseCurly)?.span;
 
@@ -364,7 +366,7 @@ impl<'a> AstBuilder<'a> {
 
         self.expect(&Token::OpenParen)?;
 
-        let params = self.parse_seperated_list(
+        let (params, end) = self.parse_seperated_list(
             Token::CloseParen,
             Token::Comma,
             |p| p.parse_type_annotation()
@@ -376,7 +378,7 @@ impl<'a> AstBuilder<'a> {
 
         let end_span = match &return_type {
             Some(rt) => rt.span,
-            None => params.last().map(|p| p.span).unwrap_or(start)
+            None => end,
         };
 
         Ok(Spanned::new(
@@ -405,17 +407,15 @@ impl<'a> AstBuilder<'a> {
             Token::OpenParen => {
                 let start = self.tokens.consume().unwrap().span;
                 
-                let types = self.parse_seperated_list(
+                let (types, end) = self.parse_seperated_list(
                     Token::CloseParen,
                     Token::Comma,
                     |p| p.parse_type_annotation()
                 )?;
 
-                let end_span = types.last().map(|t| t.span).unwrap_or(start);
-
                 Ok(Spanned::new(
                     TypeAnnotation::Tuple(types),
-                    start.combine(&end_span),
+                    start.combine(&end),
                 ))
             },
             Token::Fn => self.parse_function_type(),
@@ -430,16 +430,13 @@ impl<'a> AstBuilder<'a> {
     fn parse_generic_args(&mut self) -> Result<Spanned<Vec<SpannedType>>, Spanned<AstError>> {
         let start = self.expect(&Token::LessThan)?.span;
 
-        let args = self.parse_seperated_list(
+        let (args, end) = self.parse_seperated_list(
             Token::GreaterThan,
             Token::Comma,
             |p| p.parse_type_annotation()
         )?;
 
-        let end = self.expect(&Token::GreaterThan)?.span;
-
-        let span = start.combine(&end);
-        Ok(Spanned::new(args, span))
+        Ok(Spanned::new(args, start.combine(&end)))
     }
 
     fn parse_path(&mut self, allow_implicit_generics: bool) -> Result<Spanned<Path>, Spanned<AstError>> {
@@ -506,7 +503,7 @@ impl<'a> AstBuilder<'a> {
     }
 
     fn parse_pattern(&mut self) -> Result<Spanned<Pattern>, Spanned<AstError>> {
-       let token = self.peek_token_or_err()?;
+       let token = self.peek_token_or_err()?.clone();
 
         match token.value {
             Token::Underscore => {
@@ -515,7 +512,7 @@ impl<'a> AstBuilder<'a> {
             },
             Token::IntegerLiteral(v) => {
                 let t = self.tokens.consume().unwrap();
-                Ok(Spanned::new(Expression::Literal(LiteralValue::Integer(v)), t.span))
+                Ok(Spanned::new(Pattern::Literal(LiteralValue::Integer(v)), t.span))
             },
             Token::FloatLiteral(v) => {
                 let t = self.tokens.consume().unwrap();
@@ -527,24 +524,74 @@ impl<'a> AstBuilder<'a> {
             },
             Token::StringLiteral(v) => {
                 let t = self.tokens.consume().unwrap();
-                Ok(Spanned::new(Pattern::Literal(LiteralValue::String(v)), t.span))
+                Ok(Spanned::new(Pattern::Literal(LiteralValue::String(v.clone())), t.span))
             },
             Token::OpenParen => {
                 let start = self.tokens.consume().unwrap().span;
 
-                let patterns = self.parse_seperated_list(
+                let (patterns, end) = self.parse_seperated_list(
                     Token::CloseParen,
                     Token::Comma,
                     |p| p.parse_pattern()
                 )?;
-                let span = start.extend(self.tokens.position);
 
                 Ok(Spanned::new(
                     Pattern::Tuple { path: None, patterns },
-                    span
+                    start.combine(&end),
                 ))
+            },
+            Token::Identifier(_) => {
+                let path = self.parse_expr_path()?;
 
+                if self.check_next(&Token::OpenCurly) {
+                } else if self.check_next(&Token::OpenParen) {
+
+                }
+
+                let token = self.tokens.peek().map(|t| t.value.clone());
+                match token {
+                    Some(Token::OpenCurly) => {
+                        let start = self.tokens.consume().unwrap().span;
+                        let (fields, end) = self.parse_seperated_list(
+                            Token::CloseCurly,
+                            Token::Comma,
+                            |p| p.expect_identifier().map(|id| id.value)
+                        )?;
+
+                        Ok(Spanned::new(
+                            Pattern::Struct { path: path.value, fields },
+                            start.combine(&end)
+                        ))
+                    },
+                    Some(Token::OpenParen) => {
+                        let start = self.tokens.consume().unwrap().span;
+                        let (patterns, end) = self.parse_seperated_list(
+                            Token::CloseParen,
+                            Token::Comma,
+                            |p| p.parse_pattern()
+                        )?;
+
+                        Ok(Spanned::new(
+                            Pattern::Tuple { path: Some(path.value), patterns },
+                            start.combine(&end)
+                        ))
+                    },
+                    _ => {
+                        let pattern = if path.value.is_simple() {
+                            let ident = path.value.get_first_name().unwrap().to_string();
+                            Pattern::Identifier(ident)
+                        } else {
+                            Pattern::Path(path.value)
+                        };
+
+                        Ok(Spanned::new(pattern, path.span))
+                    }
+                }
             }
+            _ => Err(Spanned::new(
+                AstError::ExpectedPattern(token.value.clone()),
+                token.span
+            ))
         }
     }
 
@@ -677,11 +724,11 @@ impl<'a> AstBuilder<'a> {
 
             lhs = match op_token.value {
                 Token::OpenParen => {
-                    let args = self.parse_seperated_list(Token::CloseParen, Token::Comma, |p| p.parse_expression(0))?;
+                    let (args, end) = self.parse_seperated_list(Token::CloseParen, Token::Comma, |p| p.parse_expression(0))?;
                     Spanned::new(Expression::Call {
                         callee: Box::new(lhs),
                         args
-                    }, op_token.span.start..self.tokens.position)
+                    }, op_token.span.combine(&end))
                 },
                 Token::OpenBracket => {
                     let index = self.parse_expression(0)?;
@@ -745,5 +792,8 @@ impl<'a> AstBuilder<'a> {
         }
 
         Ok(lhs)
+    }
+
+    fn parse_statement(&mut self) -> StmtResult {
     }
 }

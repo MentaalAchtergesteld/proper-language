@@ -156,7 +156,7 @@ pub enum Pattern {
     Wildcard,
     Tuple {
         path: Option<Path>,
-        patterns: Vec<Pattern>,
+        patterns: Vec<Spanned<Pattern>>,
     },
 
     Struct {
